@@ -1,23 +1,25 @@
 package zfsbackup
 
 import (
-	"context"
-
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-type Reconciler struct {
-	client client.Client
+func init() {
+	schemeBuilder.Register(&ZFSBackup{})
 }
 
-func New(client client.Client) *Reconciler {
-	return &Reconciler{}
+type ZFSBackup struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   ZFSBackupSpec   `json:"spec,omitempty"`
+	Status ZFSBackupStatus `json:"status,omitempty"`
 }
 
-func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("checking request", "request", request)
-	return reconcile.Result{}, nil
-}
+func (z *ZFSBackup) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(z) }
+
+type ZFSBackupSpec struct{}
+
+type ZFSBackupStatus struct{}
