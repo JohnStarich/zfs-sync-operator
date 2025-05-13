@@ -1,0 +1,24 @@
+package main
+
+import (
+	"testing"
+
+	"github.com/johnstarich/zfs-sync-operator/internal/backup"
+	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+func TestBackup(t *testing.T) {
+	t.Parallel()
+	run := RunTest(t)
+	backup := backup.Backup{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: run.Namespace,
+			Name:      "mybackup",
+		},
+		Spec: backup.BackupSpec{},
+	}
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &backup))
+	require.NoError(t, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
+}

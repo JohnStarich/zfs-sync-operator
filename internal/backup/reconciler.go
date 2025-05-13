@@ -1,4 +1,4 @@
-package zfsbackup
+package backup
 
 import (
 	"context"
@@ -12,7 +12,7 @@ type Reconciler struct {
 	client client.Client
 }
 
-func New(client client.Client) *Reconciler {
+func NewReconciler(client client.Client) *Reconciler {
 	return &Reconciler{}
 }
 
