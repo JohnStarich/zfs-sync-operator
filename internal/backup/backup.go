@@ -1,38 +1,59 @@
+// Package backup defines and reconciles the [Backup] custom resource
 package backup
 
 import (
 	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-func init() {
-	schemeBuilder.Register(&Backup{}, &BackupList{})
+// MustScheme returns a new Backup scheme
+func MustScheme() *runtime.Scheme {
+	schemeBuilder := &scheme.Builder{
+		GroupVersion: schema.GroupVersion{
+			Group:   "zfs-sync-operator.johnstarich.com",
+			Version: "v1alpha1",
+		},
+	}
+	schemeBuilder.Register(&Backup{}, &List{})
+	scheme, err := schemeBuilder.Build()
+	if err != nil {
+		panic(err)
+	}
+	return scheme
 }
 
+// Backup represents a template to execute new backups, to send ZFS snapshots between hosts
 type Backup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   BackupSpec   `json:"spec,omitempty"`
-	Status BackupStatus `json:"status,omitempty"`
+	Spec   Spec   `json:"spec,omitempty"`
+	Status Status `json:"status,omitempty"`
 }
 
+// DeepCopyObject implements [runtime.Object]
 func (b *Backup) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(b) }
 
-type BackupSpec struct {
+// Spec defines the desired offsite [Backup] source and destination
+type Spec struct {
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
 }
 
-type BackupStatus struct {
+// Status holds status information for a [Backup]
+type Status struct {
 	State string `json:"state,omitempty"`
 }
 
-type BackupList struct {
+// List is a list of [Backup]. Required to perform a Watch.
+type List struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Backup `json:"items"`
 }
 
-func (l *BackupList) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(l) }
+// DeepCopyObject implements [runtime.Object]
+func (l *List) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(l) }

@@ -15,6 +15,7 @@ type testingLogger interface {
 	Cleanup(func())
 }
 
+// NewWriter returns a new io.Writer that sends all writes to the current test t's log
 func NewWriter(t testingLogger) *Writer {
 	w := &Writer{}
 	t.Cleanup(w.cleanUp)

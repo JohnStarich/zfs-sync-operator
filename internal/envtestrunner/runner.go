@@ -1,3 +1,4 @@
+// Package envtestrunner automates envtest binary installation, startup, and shutdown.
 package envtestrunner
 
 import (
@@ -21,6 +22,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// Runner automates envtest binary installation, startup, and shutdown
 type Runner struct {
 	ctx      context.Context
 	env      *envtest.Environment
@@ -29,6 +31,8 @@ type Runner struct {
 	scheme   *runtime.Scheme
 }
 
+// New returns a new [Runner] with the given scheme and func to run all tests in a package.
+// Typically runTests is [testing.M.Run].
 func New(ctx context.Context, runTests func() int, scheme *runtime.Scheme) *Runner {
 	return &Runner{
 		ctx:      ctx,
@@ -37,6 +41,7 @@ func New(ctx context.Context, runTests func() int, scheme *runtime.Scheme) *Runn
 	}
 }
 
+// Run executes all tests and directs output to the given writer
 func (r *Runner) Run(out io.Writer) (returnedErr error) {
 	if err := r.setUp(r.ctx, out); err != nil {
 		return err
@@ -57,14 +62,17 @@ func (r *Runner) Run(out io.Writer) (returnedErr error) {
 	return nil
 }
 
+// Context is a convenient context to use that is canceled on test suite shutdown
 func (r *Runner) Context() context.Context {
 	return r.ctx
 }
 
+// RESTConfig should be passed to an operator's constructor
 func (r *Runner) RESTConfig() *rest.Config {
 	return r.env.Config
 }
 
+// Client should be used to interact with the test kube-apiserver
 func (r *Runner) Client() client.Client {
 	return r.client
 }

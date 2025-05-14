@@ -1,3 +1,4 @@
+// Command zfs-sync-operator runs the ZFS offsite backup operator. See the README for more details.
 package main
 
 import (
@@ -62,11 +63,13 @@ func mustNewScheme() *runtime.Scheme {
 	return scheme
 }
 
+// Operator manages the lifecycle of the ZFS offsite backup operator. See the README for more details.
 type Operator struct {
 	manager  manager.Manager
 	startErr chan error
 }
 
+// New returns a new [Operator]
 func New(ctx context.Context, out io.Writer, operatorNamespace string, restConfig *rest.Config) (*Operator, error) {
 	logger := logr.FromSlogHandler(slog.NewJSONHandler(out, nil))
 
@@ -112,6 +115,7 @@ func (o *Operator) waitUntilLeader() error {
 	}
 }
 
+// Wait blocks until 'o' has terminated, then returns any error encountered
 func (o *Operator) Wait() error {
 	return <-o.startErr
 }
