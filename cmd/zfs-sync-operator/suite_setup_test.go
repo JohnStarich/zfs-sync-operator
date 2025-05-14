@@ -35,7 +35,7 @@ type TestRunConfig struct {
 	Namespace string
 }
 
-func RunTest(tb testing.TB) TestRunConfig {
+func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 	tb.Helper()
 	ctx, cancel := context.WithCancel(TestEnv.Context())
 	shutdownCtx, shutdownComplete := context.WithCancel(context.Background())
@@ -43,6 +43,11 @@ func RunTest(tb testing.TB) TestRunConfig {
 		cancel()
 		<-shutdownCtx.Done()
 	})
+	defer func() {
+		if returnedConfig == (TestRunConfig{}) { // if setup fails, allow cleanup to finish
+			shutdownComplete()
+		}
+	}()
 
 	namespace := strings.ToLower(tb.Name())
 	err := TestEnv.Client().Create(ctx, &corev1.Namespace{
@@ -51,13 +56,19 @@ func RunTest(tb testing.TB) TestRunConfig {
 		},
 	})
 	if err != nil {
-		shutdownComplete()
 		tb.Fatal(err)
 	}
 
+	operator, err := New(ctx, envtestrunner.NewWriter(tb), namespace, TestEnv.RESTConfig())
+	if err != nil {
+		tb.Fatal(err)
+	}
+	if err := operator.waitUntilLeader(); err != nil {
+		tb.Fatal(err)
+	}
 	go func() {
 		defer shutdownComplete()
-		err := Run(ctx, envtestrunner.NewWriter(tb), namespace, TestEnv.RESTConfig())
+		err := operator.Wait()
 		if err != nil {
 			tb.Fatal(err)
 		}
