@@ -24,13 +24,15 @@ spec:
                 type: string # name of Pool in same namespace; should this be a built-in ref object?
               destination:
                 type: string
+          status:
+            type: object
+            properties:
+              state:
+                type: string
     selectableFields:
     - jsonPath: .spec.source
     - jsonPath: .spec.destination
     additionalPrinterColumns:
-    - jsonPath: .spec.source
-      name: Source
-      type: string
-    - jsonPath: .spec.destination
-      name: Destination
+    - jsonPath: .status.state
+      name: Status
       type: string
