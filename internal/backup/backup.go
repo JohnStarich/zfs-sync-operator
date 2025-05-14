@@ -17,7 +17,7 @@ func MustScheme() *runtime.Scheme {
 			Version: "v1alpha1",
 		},
 	}
-	schemeBuilder.Register(&Backup{}, &List{})
+	schemeBuilder.Register(&Backup{}, &BackupList{})
 	scheme, err := schemeBuilder.Build()
 	if err != nil {
 		panic(err)
@@ -48,12 +48,14 @@ type Status struct {
 	State string `json:"state,omitempty"`
 }
 
-// List is a list of [Backup]. Required to perform a Watch.
-type List struct {
+// BackupList is a list of [Backup]. Required to perform a Watch.
+//
+//nolint:revive // The naming scheme XXXList is required to perform a Watch.
+type BackupList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Backup `json:"items"`
 }
 
 // DeepCopyObject implements [runtime.Object]
-func (l *List) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(l) }
+func (l *BackupList) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(l) }
