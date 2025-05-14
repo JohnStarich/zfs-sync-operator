@@ -9,7 +9,7 @@ lint-deps:
 	fi
 
 .PHONY: lint
-lint:
+lint: lint-deps
 	"${GO_BIN}/golangci-lint" run
 
 .PHONY: test
