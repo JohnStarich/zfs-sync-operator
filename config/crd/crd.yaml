@@ -1,0 +1,38 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: backups.zfs-sync-operator.johnstarich.com
+spec:
+  group: zfs-sync-operator.johnstarich.com
+  scope: Namespaced
+  names:
+    plural: backups
+    singular: backup
+    kind: Backup
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              source:
+                type: string # name of Pool in same namespace; should this be a built-in ref object?
+              destination:
+                type: string
+          status:
+            type: object
+            properties:
+              state:
+                type: string
+    selectableFields:
+    - jsonPath: .spec.source
+    - jsonPath: .spec.destination
+    additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: Status
+      type: string

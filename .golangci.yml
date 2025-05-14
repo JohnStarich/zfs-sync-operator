@@ -1,0 +1,20 @@
+version: "2"
+linters:
+  enable:
+    # Default linters, plus these:
+    - exhaustive
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gosec
+    - misspell
+    - nakedret
+    - nilerr
+    - noctx
+    - nolintlint
+    - paralleltest
+    - revive
+    - testifylint
+    - unconvert
+    - unparam
