@@ -7,7 +7,7 @@ import (
 )
 
 func init() {
-	schemeBuilder.Register(&Backup{})
+	schemeBuilder.Register(&Backup{}, &BackupList{})
 }
 
 type Backup struct {
@@ -18,8 +18,21 @@ type Backup struct {
 	Status BackupStatus `json:"status,omitempty"`
 }
 
-func (z *Backup) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(z) }
+func (b *Backup) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(b) }
 
-type BackupSpec struct{}
+type BackupSpec struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
 
-type BackupStatus struct{}
+type BackupStatus struct {
+	State string `json:"state,omitempty"`
+}
+
+type BackupList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Backup `json:"items"`
+}
+
+func (l *BackupList) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(l) }
