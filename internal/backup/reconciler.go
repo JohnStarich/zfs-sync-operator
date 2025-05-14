@@ -20,10 +20,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	log := log.FromContext(ctx)
 	log.Info("checking request", "request", request)
 	var backup Backup
-	err := r.client.Get(ctx, request.NamespacedName, &backup)
-	if err != nil {
+	if err := r.client.Get(ctx, request.NamespacedName, &backup); err != nil {
 		return reconcile.Result{}, err
 	}
-	log.Info("backup event!", "backup", backup)
+	backup.Status.State = "Ready"
+	if err := r.client.Update(ctx, &backup); err != nil {
+		return reconcile.Result{}, err
+	}
 	return reconcile.Result{}, nil
 }
