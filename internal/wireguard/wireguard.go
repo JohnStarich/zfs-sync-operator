@@ -3,6 +3,7 @@ package wireguard
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -141,5 +142,5 @@ func valueOrZeroValue[Value any](pointer *Value) Value {
 }
 
 func keyToHex(key wgtypes.Key) string {
-	return fmt.Sprintf("%x", [wgtypes.KeyLen]byte(key))
+	return hex.EncodeToString(key[:])
 }
