@@ -58,7 +58,7 @@ func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*nets
 	if config.LogHandler != nil {
 		logger = slog.New(config.LogHandler)
 	}
-	iface := NewInterface(logger, localAddress, config.DNSAddresses)
+	iface := newInterface(logger, localAddress, config.DNSAddresses)
 	device, dialer, err := iface.Start(ctx)
 	if err != nil {
 		return nil, err

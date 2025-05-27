@@ -20,8 +20,8 @@ type DeviceInterface struct {
 	runErr       error
 }
 
-// NewInterface returns a new [DeviceInterface] for the given interface name
-func NewInterface(logger *slog.Logger, localAddress netip.Addr, dnsAddresses []netip.Addr) *DeviceInterface {
+// newInterface returns a new [DeviceInterface] for the given interface name
+func newInterface(logger *slog.Logger, localAddress netip.Addr, dnsAddresses []netip.Addr) *DeviceInterface {
 	if len(dnsAddresses) == 0 {
 		// CloudFlare DNS
 		dnsAddresses = []netip.Addr{
