@@ -1,14 +1,14 @@
 package wireguard
 
 import (
+	"bytes"
 	"context"
-	"crypto/rand"
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/pkg/errors"
-	"golang.org/x/sys/unix"
-	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -19,15 +19,15 @@ type Config struct {
 	PeerIP        string
 	PeerPort      int
 	AllowedIPs    []net.IPNet
+	ListenPort    int
 }
 
-func Connect(ctx context.Context, config Config) (returnedErr error) {
+func Connect(ctx context.Context, config Config) (dialer *netstack.Net, returnedErr error) {
 	defer func() { returnedErr = errors.WithStack(returnedErr) }()
-	interfaceName := mustNewInterfaceName()
-	iface := NewInterface(interfaceName)
-	err := iface.Start(ctx)
+	iface := NewInterface()
+	device, dialer, err := iface.Start(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	go func() {
 		err := iface.Wait()
@@ -38,44 +38,52 @@ func Connect(ctx context.Context, config Config) (returnedErr error) {
 
 	privateKey, err := wgtypes.ParseKey(config.PrivateKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	peerPublicKey, err := wgtypes.ParseKey(config.PeerPublicKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var presharedKey *wgtypes.Key
 	if config.PresharedKey != nil {
 		key, presharedKeyErr := wgtypes.ParseKey(*config.PresharedKey)
 		if presharedKeyErr != nil {
-			return presharedKeyErr
+			return nil, presharedKeyErr
 		}
 		presharedKey = &key
 	}
-	peerIP := net.ParseIP(config.PeerIP)
-	if peerIP == nil {
-		return errors.Errorf("invalid IP: %q", config.PeerIP)
+	var peers []wgtypes.PeerConfig
+	if config.PeerIP != "" {
+		peerIP := net.ParseIP(config.PeerIP)
+		if peerIP == nil {
+			return nil, errors.Errorf("invalid IP: %q", config.PeerIP)
+		}
+		peers = []wgtypes.PeerConfig{
+			{
+				PublicKey:    peerPublicKey,
+				PresharedKey: presharedKey,
+				AllowedIPs:   config.AllowedIPs,
+				Endpoint:     &net.UDPAddr{IP: peerIP, Port: config.PeerPort},
+			},
+		}
 	}
-	peer := wgtypes.PeerConfig{
-		PublicKey:    peerPublicKey,
-		PresharedKey: presharedKey,
-		AllowedIPs:   config.AllowedIPs,
-		Endpoint:     &net.UDPAddr{IP: peerIP, Port: config.PeerPort},
+	var listenPort *int
+	if config.ListenPort != 0 {
+		listenPort = &config.ListenPort
 	}
-	client, err := wgctrl.New()
-	if err != nil {
-		return err
-	}
-	defer client.Close()
-	fmt.Println("iface name:", interfaceName)
-	err = client.ConfigureDevice(interfaceName, wgtypes.Config{
+	wgConfig := wgtypes.Config{
 		PrivateKey:   &privateKey,
 		ReplacePeers: true,
-		Peers:        []wgtypes.PeerConfig{peer},
-	})
-	if err != nil {
-		return err
+		ListenPort:   listenPort,
+		Peers:        peers,
 	}
+
+	var buf bytes.Buffer
+	writeConfig(&buf, wgConfig)
+	if err := device.IpcSetOperation(&buf); err != nil {
+		return nil, err
+	}
+
 	/*
 		TODO
 
@@ -83,19 +91,42 @@ func Connect(ctx context.Context, config Config) (returnedErr error) {
 		- test connection between them, stats maybe?
 		- maybe move to separate container to facilitate and isolate the connections
 	*/
-	return nil
+	return dialer, nil
 }
 
-// mustNewInterfaceName returns a new random interface name to reduce likelihood of a collision and interface creation errors.
-// Must comply to unix interface name length limits.
-func mustNewInterfaceName() string {
-	const maxLength = unix.IFNAMSIZ - 1
-	const prefix = "wg-"
-	const hexDigitsPerByte = 2
-	buf := make([]byte, (maxLength-len(prefix))/hexDigitsPerByte)
-	_, err := rand.Read(buf)
-	if err != nil {
-		panic(err)
+func writeConfig(w io.Writer, cfg wgtypes.Config) {
+	writeIf(w, cfg.PrivateKey != nil, "private_key=%s\n", keyToHex(valueOrZeroValue(cfg.PrivateKey)))
+	writeIf(w, cfg.ListenPort != nil, "listen_port=%d\n", valueOrZeroValue(cfg.ListenPort))
+	writeIf(w, cfg.FirewallMark != nil, "fwmark=%d\n", valueOrZeroValue(cfg.FirewallMark))
+	writeIf(w, cfg.ReplacePeers, "replace_peers=true\n")
+	for _, p := range cfg.Peers {
+		fmt.Fprintf(w, "public_key=%s\n", keyToHex(p.PublicKey))
+		writeIf(w, p.Remove, "remove=true\n")
+		writeIf(w, p.UpdateOnly, "update_only=true\n")
+		writeIf(w, p.PresharedKey != nil, "preshared_key=%s\n", keyToHex(valueOrZeroValue(p.PresharedKey)))
+		writeIf(w, p.Endpoint != nil, "endpoint=%s\n", p.Endpoint.String())
+		writeIf(w, p.PersistentKeepaliveInterval != nil, "persistent_keepalive_interval=%d\n", int(valueOrZeroValue(p.PersistentKeepaliveInterval).Seconds()))
+		writeIf(w, p.ReplaceAllowedIPs, "replace_allowed_ips=true\n")
+		for _, ip := range p.AllowedIPs {
+			fmt.Fprintf(w, "allowed_ip=%s\n", ip.String())
+		}
 	}
-	return fmt.Sprintf("%s%x", prefix, buf)
+}
+
+func writeIf(w io.Writer, cond bool, format string, args ...any) {
+	if cond {
+		fmt.Fprintf(w, format, args...)
+	}
+}
+
+func valueOrZeroValue[Value any](valuePointer *Value) Value {
+	if valuePointer == nil {
+		var zeroValue Value
+		return zeroValue
+	}
+	return *valuePointer
+}
+
+func keyToHex(key wgtypes.Key) string {
+	return fmt.Sprintf("%x\n", [wgtypes.KeyLen]byte(key))
 }
