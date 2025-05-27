@@ -59,7 +59,12 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 		tb.Fatal(err)
 	}
 
-	operator, err := New(ctx, envtestrunner.NewWriter(tb), namespace, TestEnv.RESTConfig())
+	operator, err := New(ctx, TestEnv.RESTConfig(), Config{
+		Namespace:         namespace,
+		Out:               envtestrunner.NewWriter(tb),
+		MetricsPort:       "0",
+		idempotentMetrics: true,
+	})
 	if err != nil {
 		tb.Fatal(err)
 	}

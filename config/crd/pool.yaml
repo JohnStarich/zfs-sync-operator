@@ -1,0 +1,62 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: pools.zfs-sync-operator.johnstarich.com
+spec:
+  group: zfs-sync-operator.johnstarich.com
+  scope: Namespaced
+  names:
+    plural: pools
+    singular: pool
+    kind: Pool
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              wireguard:
+                type: object
+                properties:
+                  dnsAddresses:
+                    type: array
+                    items:
+                      type: string
+                  peerAddress:
+                    type: string
+                  peerPublicKey:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      key:
+                        type: string
+                  presharedKey:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      key:
+                        type: string
+                  privateKey:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      key:
+                        type: string
+          status:
+            type: object
+            properties:
+              state:
+                type: string
+    selectableFields: []
+    additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: Status
+      type: string
