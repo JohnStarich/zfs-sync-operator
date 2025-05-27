@@ -2,8 +2,7 @@ package wireguard
 
 import (
 	"context"
-	"net"
-	"net/http"
+	"io"
 	"os"
 	"os/signal"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-// TODO this currently requires sudo to run
 func TestConnect(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -22,65 +20,23 @@ func TestConnect(t *testing.T) {
 	ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
 	t.Cleanup(cancel)
 
-	// presharedKey, err := wgtypes.GenerateKey()
-	// require.NoError(t, err)
-	privateKeyClient, err := wgtypes.GeneratePrivateKey()
+	serverPrivateKey, err := wgtypes.GeneratePrivateKey()
 	require.NoError(t, err)
-	privateKeyServer, err := wgtypes.GeneratePrivateKey()
+	serverPublicKey := serverPrivateKey.PublicKey()
+	clientPrivateKey, err := wgtypes.GeneratePrivateKey()
 	require.NoError(t, err)
+	clientPublicKey := clientPrivateKey.PublicKey()
 
-	const wireguardPort = 58120
-	dialerServer, err := Connect(ctx, Config{
-		PrivateKey:    privateKeyServer.String(),
-		PeerPublicKey: privateKeyClient.PublicKey().String(),
-		ListenPort:    wireguardPort,
-		AllowedIPs: []net.IPNet{
-			{
-				IP:   net.ParseIP("0.0.0.0"),
-				Mask: net.CIDRMask(0, 32),
-			},
-		},
-	})
-	require.NoError(t, err)
-	listenerServer, err := dialerServer.ListenTCP(&net.TCPAddr{Port: 80})
-	require.NoError(t, err)
 	go func() {
-		server := http.Server{
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			}),
-		}
-		_ = server.Serve(listenerServer)
+		_, err := StartServer(ctx, serverPrivateKey, clientPublicKey)
+		require.NoError(t, err)
 	}()
-	time.Sleep(100 * time.Millisecond)
-
-	dialerClient, err := Connect(ctx, Config{
-		PrivateKey:    privateKeyClient.String(),
-		PeerPublicKey: privateKeyServer.PublicKey().String(),
-		PeerIP:        "127.0.0.1",
-		PeerPort:      wireguardPort,
-		AllowedIPs: []net.IPNet{
-			{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)}, // 0.0.0.0/0
-		},
-	})
+	httpClient, err := StartClient(ctx, clientPrivateKey, serverPublicKey)
 	require.NoError(t, err)
-	httpClient := http.Client{
-		Transport: &http.Transport{
-			DialContext: dialerClient.DialContext,
-		},
-	}
-	resp, err := httpClient.Get("http://10.3.0.3")
+
+	resp, err := httpClient.Get("http://192.168.4.29/")
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// addrs, err := dialerClient.LookupHost("google.com")
-	// require.NoError(t, err)
-	// require.NotEmpty(t, addrs)
-	// conn, err := dialerClient.DialTCP(net.TCPAddrFromAddrPort(netip.MustParseAddrPort(net.JoinHostPort(addrs[0], "80"))))
-	// require.NoError(t, err)
-	// assert.NotNil(t, conn)
-}
-
-func startServer(t *testing.T) {
-	t.Helper()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "Hello from userspace TCP!", string(body))
 }

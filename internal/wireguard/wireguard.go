@@ -3,11 +3,15 @@ package wireguard
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
+	"net/http"
+	"net/netip"
 
-	"github.com/pkg/errors"
+	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -22,76 +26,90 @@ type Config struct {
 	ListenPort    int
 }
 
-func Connect(ctx context.Context, config Config) (dialer *netstack.Net, returnedErr error) {
-	defer func() { returnedErr = errors.WithStack(returnedErr) }()
-	iface := NewInterface()
-	device, dialer, err := iface.Start(ctx)
+func startInterface(ctx context.Context, logger *slog.Logger, localAddress netip.Addr) (*device.Device, *netstack.Net, error) {
+	iface := NewInterface(logger)
+	device, dialer, err := iface.Start(ctx, localAddress)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	go func() {
 		err := iface.Wait()
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("Failed on wait for interface:", err)
 		}
 	}()
+	return device, dialer, nil
+}
 
-	privateKey, err := wgtypes.ParseKey(config.PrivateKey)
-	if err != nil {
-		return nil, err
+func StartServer(ctx context.Context, privateKey wgtypes.Key, peerPublicKey wgtypes.Key) (*netstack.Net, error) {
+	device, dialer, connectErr := startInterface(ctx, slog.Default(), netip.MustParseAddr("192.168.4.29"))
+	if connectErr != nil {
+		return nil, connectErr
 	}
-	peerPublicKey, err := wgtypes.ParseKey(config.PeerPublicKey)
-	if err != nil {
-		return nil, err
-	}
-	var presharedKey *wgtypes.Key
-	if config.PresharedKey != nil {
-		key, presharedKeyErr := wgtypes.ParseKey(*config.PresharedKey)
-		if presharedKeyErr != nil {
-			return nil, presharedKeyErr
-		}
-		presharedKey = &key
-	}
-	var peers []wgtypes.PeerConfig
-	if config.PeerIP != "" {
-		peerIP := net.ParseIP(config.PeerIP)
-		if peerIP == nil {
-			return nil, errors.Errorf("invalid IP: %q", config.PeerIP)
-		}
-		peers = []wgtypes.PeerConfig{
+	var configBuffer bytes.Buffer
+	writeConfig(&configBuffer, wgtypes.Config{
+		PrivateKey: toPointer(privateKey),
+		ListenPort: toPointer(58120),
+		Peers: []wgtypes.PeerConfig{
 			{
-				PublicKey:    peerPublicKey,
-				PresharedKey: presharedKey,
-				AllowedIPs:   config.AllowedIPs,
-				Endpoint:     &net.UDPAddr{IP: peerIP, Port: config.PeerPort},
+				PublicKey: peerPublicKey,
+				AllowedIPs: []net.IPNet{
+					{IP: net.ParseIP("192.168.4.28"), Mask: net.CIDRMask(32, 32)},
+				},
 			},
-		}
-	}
-	var listenPort *int
-	if config.ListenPort != 0 {
-		listenPort = &config.ListenPort
-	}
-	wgConfig := wgtypes.Config{
-		PrivateKey:   &privateKey,
-		ReplacePeers: true,
-		ListenPort:   listenPort,
-		Peers:        peers,
-	}
-
-	var buf bytes.Buffer
-	writeConfig(&buf, wgConfig)
-	if err := device.IpcSetOperation(&buf); err != nil {
+		},
+	})
+	if err := device.IpcSet(configBuffer.String()); err != nil {
 		return nil, err
 	}
-
-	/*
-		TODO
-
-		- configure a source and destination
-		- test connection between them, stats maybe?
-		- maybe move to separate container to facilitate and isolate the connections
-	*/
+	if err := device.Up(); err != nil {
+		return nil, err
+	}
+	listener, err := dialer.ListenTCP(&net.TCPAddr{Port: 80})
+	if err != nil {
+		return nil, err
+	}
+	server := http.Server{
+		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			fmt.Printf("> %s - %s - %s\n", request.RemoteAddr, request.URL.String(), request.UserAgent())
+			io.WriteString(writer, "Hello from userspace TCP!")
+		}),
+	}
+	if err := server.Serve(listener); err != nil {
+		return nil, err
+	}
 	return dialer, nil
+}
+
+func StartClient(ctx context.Context, privateKey wgtypes.Key, peerPublicKey wgtypes.Key) (*http.Client, error) {
+	device, dialer, connectErr := startInterface(ctx, slog.Default(), netip.MustParseAddr("192.168.4.28"))
+	if connectErr != nil {
+		return nil, connectErr
+	}
+	var configBuffer bytes.Buffer
+	writeConfig(&configBuffer, wgtypes.Config{
+		PrivateKey: toPointer(privateKey),
+		Peers: []wgtypes.PeerConfig{
+			{
+				PublicKey: peerPublicKey,
+				Endpoint:  net.UDPAddrFromAddrPort(netip.MustParseAddrPort("127.0.0.1:58120")),
+				AllowedIPs: []net.IPNet{
+					{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)},
+				},
+			},
+		},
+	})
+	if err := device.IpcSet(configBuffer.String()); err != nil {
+		return nil, err
+	}
+	if err := device.Up(); err != nil {
+		return nil, err
+	}
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: dialer.DialContext,
+		},
+	}, nil
 }
 
 func writeConfig(w io.Writer, cfg wgtypes.Config) {
@@ -119,14 +137,26 @@ func writeIf(w io.Writer, cond bool, format string, args ...any) {
 	}
 }
 
-func valueOrZeroValue[Value any](valuePointer *Value) Value {
-	if valuePointer == nil {
+func toPointer[Value any](value Value) *Value {
+	return &value
+}
+
+func valueOrZeroValue[Value any](pointer *Value) Value {
+	if pointer == nil {
 		var zeroValue Value
 		return zeroValue
 	}
-	return *valuePointer
+	return *pointer
 }
 
 func keyToHex(key wgtypes.Key) string {
-	return fmt.Sprintf("%x\n", [wgtypes.KeyLen]byte(key))
+	return fmt.Sprintf("%x", [wgtypes.KeyLen]byte(key))
+}
+
+func mustHexDecode(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
