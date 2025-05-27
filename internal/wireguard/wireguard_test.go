@@ -53,7 +53,7 @@ func startServer(t *testing.T, addr netip.AddrPort, presharedKey, privateKey, pe
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	dialer, err := Connect(ctx, addr.Addr(), Config{
-		PresharedKey:  toPointer(presharedKey[:]),
+		PresharedKey:  presharedKey[:],
 		PrivateKey:    privateKey[:],
 		PeerPublicKey: peerPublicKey[:],
 		ListenPort:    int(addr.Port()),
@@ -79,7 +79,7 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	dialer, err := Connect(ctx, addr, Config{
-		PresharedKey:  toPointer(presharedKey[:]),
+		PresharedKey:  presharedKey[:],
 		PrivateKey:    privateKey[:],
 		PeerPublicKey: peerPublicKey[:],
 		PeerAddr:      &peerAddr,

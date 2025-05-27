@@ -15,12 +15,13 @@ import (
 )
 
 type Config struct {
-	PresharedKey  *[]byte
-	PrivateKey    []byte
+	DNSAddresses  []netip.Addr    // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
+	ListenPort    int             // Optional: The port number to listen for WireGuard connections.
+	LogHandler    slog.Handler    // Defaults to slog.Default().
+	PeerAddr      *netip.AddrPort // Optional: The address to connect to a remote WireGuard peer.
 	PeerPublicKey []byte
-	PeerAddr      *netip.AddrPort
-	ListenPort    int
-	LogHandler    slog.Handler
+	PresharedKey  []byte // Optional, but highly recommended.
+	PrivateKey    []byte
 }
 
 func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*netstack.Net, error) {
@@ -29,8 +30,8 @@ func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*nets
 		listenPort = toPointer(config.ListenPort)
 	}
 	var presharedKey *wgtypes.Key
-	if config.PresharedKey != nil {
-		presharedKey = toPointer(wgtypes.Key(*config.PresharedKey))
+	if len(config.PresharedKey) > 0 {
+		presharedKey = toPointer(wgtypes.Key(config.PresharedKey))
 	}
 	var endpoint *net.UDPAddr
 	if config.PeerAddr != nil {
@@ -57,15 +58,15 @@ func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*nets
 	if config.LogHandler != nil {
 		logger = slog.New(config.LogHandler)
 	}
-	iface := NewInterface(logger)
-	device, dialer, err := iface.Start(ctx, localAddress)
+	iface := NewInterface(logger, localAddress, config.DNSAddresses)
+	device, dialer, err := iface.Start(ctx)
 	if err != nil {
 		return nil, err
 	}
 	go func() {
 		err := iface.Wait()
 		if err != nil {
-			fmt.Println("Failed on wait for interface:", err)
+			logger.Error("Failed on wait for interface", slog.Any("error", err))
 		}
 	}()
 

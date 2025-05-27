@@ -13,30 +13,34 @@ import (
 
 // DeviceInterface starts, runs, and stops a WireGuard device's interface in userspace.
 type DeviceInterface struct {
-	done   chan struct{}
-	logger *slog.Logger
-	runErr error
+	dnsAddresses []netip.Addr
+	done         chan struct{}
+	localAddress netip.Addr
+	logger       *slog.Logger
+	runErr       error
 }
 
 // NewInterface returns a new [DeviceInterface] for the given interface name
-func NewInterface(logger *slog.Logger) *DeviceInterface {
+func NewInterface(logger *slog.Logger, localAddress netip.Addr, dnsAddresses []netip.Addr) *DeviceInterface {
+	if len(dnsAddresses) == 0 {
+		// CloudFlare DNS
+		dnsAddresses = []netip.Addr{
+			netip.MustParseAddr("1.0.0.1"),
+			netip.MustParseAddr("1.1.1.1"),
+		}
+	}
 	return &DeviceInterface{
-		done:   make(chan struct{}),
-		logger: logger,
+		dnsAddresses: dnsAddresses,
+		done:         make(chan struct{}),
+		localAddress: localAddress,
+		logger:       logger,
 	}
 }
 
 // Starts and runs the interface until the context is canceled.
 // Use [Wait] to view any errors encountered while running.
-func (i *DeviceInterface) Start(ctx context.Context, localAddress netip.Addr) (*wgdevice.Device, *netstack.Net, error) {
-	tunDevice, tunNet, err := netstack.CreateNetTUN(
-		[]netip.Addr{localAddress},
-		// CloudFlare DNS
-		[]netip.Addr{
-			netip.MustParseAddr("1.0.0.1"),
-			netip.MustParseAddr("1.1.1.1"),
-		},
-		wgdevice.DefaultMTU)
+func (i *DeviceInterface) Start(ctx context.Context) (*wgdevice.Device, *netstack.Net, error) {
+	tunDevice, tunNet, err := netstack.CreateNetTUN([]netip.Addr{i.localAddress}, i.dnsAddresses, wgdevice.DefaultMTU)
 	if err != nil {
 		return nil, nil, err
 	}
