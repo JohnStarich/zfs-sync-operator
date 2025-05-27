@@ -3,6 +3,8 @@ package wireguard
 import (
 	"context"
 	"io"
+	"log/slog"
+	"net/netip"
 	"os"
 	"os/signal"
 	"testing"
@@ -28,10 +30,10 @@ func TestConnect(t *testing.T) {
 	clientPublicKey := clientPrivateKey.PublicKey()
 
 	go func() {
-		_, err := StartServer(ctx, serverPrivateKey, clientPublicKey)
+		_, err := StartServer(ctx, slog.Default(), netip.MustParseAddrPort("192.168.4.29:58120"), serverPrivateKey, clientPublicKey)
 		require.NoError(t, err)
 	}()
-	httpClient, err := StartClient(ctx, clientPrivateKey, serverPublicKey)
+	httpClient, err := StartClient(ctx, slog.Default(), netip.MustParseAddr("192.168.4.28"), clientPrivateKey, netip.MustParseAddrPort("127.0.0.1:58120"), serverPublicKey)
 	require.NoError(t, err)
 
 	resp, err := httpClient.Get("http://192.168.4.29/")

@@ -31,9 +31,10 @@ func NewInterface(logger *slog.Logger) *DeviceInterface {
 func (i *DeviceInterface) Start(ctx context.Context, localAddress netip.Addr) (*wgdevice.Device, *netstack.Net, error) {
 	tunDevice, tunNet, err := netstack.CreateNetTUN(
 		[]netip.Addr{localAddress},
+		// CloudFlare DNS
 		[]netip.Addr{
-			netip.MustParseAddr("8.8.8.8"),
-			netip.MustParseAddr("8.8.4.4"),
+			netip.MustParseAddr("1.0.0.1"),
+			netip.MustParseAddr("1.1.1.1"),
 		},
 		wgdevice.DefaultMTU)
 	if err != nil {

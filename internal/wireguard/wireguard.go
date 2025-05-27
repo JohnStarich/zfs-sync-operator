@@ -3,7 +3,6 @@ package wireguard
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,7 +10,6 @@ import (
 	"net/http"
 	"net/netip"
 
-	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -26,11 +24,11 @@ type Config struct {
 	ListenPort    int
 }
 
-func startInterface(ctx context.Context, logger *slog.Logger, localAddress netip.Addr) (*device.Device, *netstack.Net, error) {
+func startInterface(ctx context.Context, logger *slog.Logger, localAddress netip.Addr, config wgtypes.Config) (*netstack.Net, error) {
 	iface := NewInterface(logger)
 	device, dialer, err := iface.Start(ctx, localAddress)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	go func() {
 		err := iface.Wait()
@@ -38,32 +36,33 @@ func startInterface(ctx context.Context, logger *slog.Logger, localAddress netip
 			fmt.Println("Failed on wait for interface:", err)
 		}
 	}()
-	return device, dialer, nil
-}
 
-func StartServer(ctx context.Context, privateKey wgtypes.Key, peerPublicKey wgtypes.Key) (*netstack.Net, error) {
-	device, dialer, connectErr := startInterface(ctx, slog.Default(), netip.MustParseAddr("192.168.4.29"))
-	if connectErr != nil {
-		return nil, connectErr
-	}
 	var configBuffer bytes.Buffer
-	writeConfig(&configBuffer, wgtypes.Config{
-		PrivateKey: toPointer(privateKey),
-		ListenPort: toPointer(58120),
-		Peers: []wgtypes.PeerConfig{
-			{
-				PublicKey: peerPublicKey,
-				AllowedIPs: []net.IPNet{
-					{IP: net.ParseIP("192.168.4.28"), Mask: net.CIDRMask(32, 32)},
-				},
-			},
-		},
-	})
-	if err := device.IpcSet(configBuffer.String()); err != nil {
+	writeConfig(&configBuffer, config)
+	if err := device.IpcSetOperation(&configBuffer); err != nil {
 		return nil, err
 	}
 	if err := device.Up(); err != nil {
 		return nil, err
+	}
+	return dialer, nil
+}
+
+func StartServer(ctx context.Context, logger *slog.Logger, addr netip.AddrPort, privateKey wgtypes.Key, peerPublicKey wgtypes.Key) (*netstack.Net, error) {
+	dialer, connectErr := startInterface(ctx, logger, addr.Addr(), wgtypes.Config{
+		PrivateKey: toPointer(privateKey),
+		ListenPort: toPointer(int(addr.Port())),
+		Peers: []wgtypes.PeerConfig{
+			{
+				PublicKey: peerPublicKey,
+				AllowedIPs: []net.IPNet{
+					{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)},
+				},
+			},
+		},
+	})
+	if connectErr != nil {
+		return nil, connectErr
 	}
 	listener, err := dialer.ListenTCP(&net.TCPAddr{Port: 80})
 	if err != nil {
@@ -81,29 +80,21 @@ func StartServer(ctx context.Context, privateKey wgtypes.Key, peerPublicKey wgty
 	return dialer, nil
 }
 
-func StartClient(ctx context.Context, privateKey wgtypes.Key, peerPublicKey wgtypes.Key) (*http.Client, error) {
-	device, dialer, connectErr := startInterface(ctx, slog.Default(), netip.MustParseAddr("192.168.4.28"))
-	if connectErr != nil {
-		return nil, connectErr
-	}
-	var configBuffer bytes.Buffer
-	writeConfig(&configBuffer, wgtypes.Config{
+func StartClient(ctx context.Context, logger *slog.Logger, addr netip.Addr, privateKey wgtypes.Key, peerAddr netip.AddrPort, peerPublicKey wgtypes.Key) (*http.Client, error) {
+	dialer, connectErr := startInterface(ctx, logger, addr, wgtypes.Config{
 		PrivateKey: toPointer(privateKey),
 		Peers: []wgtypes.PeerConfig{
 			{
 				PublicKey: peerPublicKey,
-				Endpoint:  net.UDPAddrFromAddrPort(netip.MustParseAddrPort("127.0.0.1:58120")),
+				Endpoint:  net.UDPAddrFromAddrPort(peerAddr),
 				AllowedIPs: []net.IPNet{
 					{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)},
 				},
 			},
 		},
 	})
-	if err := device.IpcSet(configBuffer.String()); err != nil {
-		return nil, err
-	}
-	if err := device.Up(); err != nil {
-		return nil, err
+	if connectErr != nil {
+		return nil, connectErr
 	}
 	return &http.Client{
 		Transport: &http.Transport{
@@ -151,12 +142,4 @@ func valueOrZeroValue[Value any](pointer *Value) Value {
 
 func keyToHex(key wgtypes.Key) string {
 	return fmt.Sprintf("%x", [wgtypes.KeyLen]byte(key))
-}
-
-func mustHexDecode(s string) []byte {
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		panic(err)
-	}
-	return b
 }
