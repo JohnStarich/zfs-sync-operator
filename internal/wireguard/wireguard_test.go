@@ -2,7 +2,6 @@ package wireguard
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +16,9 @@ import (
 
 func TestConnectToHTTPServer(t *testing.T) {
 	t.Parallel()
+	presharedKey, err := wgtypes.GenerateKey()
+	require.NoError(t, err)
+
 	serverPrivateKey, err := wgtypes.GeneratePrivateKey()
 	require.NoError(t, err)
 	serverPublicKey := serverPrivateKey.PublicKey()
@@ -30,26 +32,28 @@ func TestConnectToHTTPServer(t *testing.T) {
 		serverRealAddr = "127.0.0.1"
 		serverVPNPort  = 58120
 	)
-	go startServer(t, netip.AddrPortFrom(netip.MustParseAddr(serverVPNAddr), serverVPNPort), serverPrivateKey, clientPublicKey)
+	const someMessage = "Hello, World!"
+	go startServer(t, netip.AddrPortFrom(netip.MustParseAddr(serverVPNAddr), serverVPNPort), presharedKey, serverPrivateKey, clientPublicKey, someMessage)
 	serverHTTPURL := url.URL{
 		Scheme: "http",
 		Host:   serverVPNAddr,
 	}
 
 	const clientVPNAddr = "192.168.4.28"
-	httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), clientPrivateKey, netip.AddrPortFrom(netip.MustParseAddr(serverRealAddr), serverVPNPort), serverPublicKey)
+	httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, clientPrivateKey, serverPublicKey, netip.AddrPortFrom(netip.MustParseAddr(serverRealAddr), serverVPNPort))
 	resp, err := httpClient.Get(serverHTTPURL.String())
 	require.NoError(t, err)
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	assert.Equal(t, "Hello from userspace TCP!", string(body))
+	assert.Equal(t, someMessage, string(body))
 }
 
-func startServer(t *testing.T, addr netip.AddrPort, privateKey wgtypes.Key, peerPublicKey wgtypes.Key) {
+func startServer(t *testing.T, addr netip.AddrPort, presharedKey, privateKey, peerPublicKey wgtypes.Key, message string) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	dialer, err := Connect(ctx, addr.Addr(), Config{
+		PresharedKey:  toPointer(presharedKey[:]),
 		PrivateKey:    privateKey[:],
 		PeerPublicKey: peerPublicKey[:],
 		ListenPort:    int(addr.Port()),
@@ -59,9 +63,9 @@ func startServer(t *testing.T, addr netip.AddrPort, privateKey wgtypes.Key, peer
 	require.NoError(t, err)
 
 	server := http.Server{
-		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			fmt.Printf("> %s - %s - %s\n", request.RemoteAddr, request.URL.String(), request.UserAgent())
-			io.WriteString(writer, "Hello from userspace TCP!")
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Logf("Request received: %s - %s - %s\n", r.RemoteAddr, r.URL.String(), r.UserAgent())
+			io.WriteString(w, message)
 		}),
 	}
 	require.NoError(t, server.Serve(listener))
@@ -70,11 +74,12 @@ func startServer(t *testing.T, addr netip.AddrPort, privateKey wgtypes.Key, peer
 	})
 }
 
-func makeHTTPClient(t *testing.T, addr netip.Addr, privateKey wgtypes.Key, peerAddr netip.AddrPort, peerPublicKey wgtypes.Key) *http.Client {
+func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key, peerAddr netip.AddrPort) *http.Client {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	dialer, err := Connect(ctx, addr, Config{
+		PresharedKey:  toPointer(presharedKey[:]),
 		PrivateKey:    privateKey[:],
 		PeerPublicKey: peerPublicKey[:],
 		PeerAddr:      &peerAddr,

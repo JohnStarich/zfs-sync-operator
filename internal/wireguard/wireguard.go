@@ -15,8 +15,8 @@ import (
 )
 
 type Config struct {
-	PrivateKey    []byte
 	PresharedKey  *[]byte
+	PrivateKey    []byte
 	PeerPublicKey []byte
 	PeerAddr      *netip.AddrPort
 	ListenPort    int
