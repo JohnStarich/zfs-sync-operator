@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"net/netip"
 
 	"golang.zx2c4.com/wireguard/tun/netstack"
@@ -16,16 +15,48 @@ import (
 )
 
 type Config struct {
-	PrivateKey    string
-	PresharedKey  *string
-	PeerPublicKey string
-	PeerIP        string
-	PeerPort      int
-	AllowedIPs    []net.IPNet
+	PrivateKey    []byte
+	PresharedKey  *[]byte
+	PeerPublicKey []byte
+	PeerAddr      *netip.AddrPort
 	ListenPort    int
+	LogHandler    slog.Handler
 }
 
-func startInterface(ctx context.Context, logger *slog.Logger, localAddress netip.Addr, config wgtypes.Config) (*netstack.Net, error) {
+func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*netstack.Net, error) {
+	var listenPort *int
+	if config.ListenPort != 0 {
+		listenPort = toPointer(config.ListenPort)
+	}
+	var presharedKey *wgtypes.Key
+	if config.PresharedKey != nil {
+		presharedKey = toPointer(wgtypes.Key(*config.PresharedKey))
+	}
+	var endpoint *net.UDPAddr
+	if config.PeerAddr != nil {
+		endpoint = net.UDPAddrFromAddrPort(*config.PeerAddr)
+	}
+	wgConfig := wgtypes.Config{
+		PrivateKey:   toPointer(wgtypes.Key(config.PrivateKey)),
+		ListenPort:   listenPort,
+		ReplacePeers: true,
+		Peers: []wgtypes.PeerConfig{
+			{
+				PublicKey:         wgtypes.Key(config.PeerPublicKey),
+				PresharedKey:      presharedKey,
+				Endpoint:          endpoint,
+				ReplaceAllowedIPs: true,
+				AllowedIPs: []net.IPNet{
+					{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)},
+				},
+			},
+		},
+	}
+
+	logger := slog.Default()
+	if config.LogHandler != nil {
+		logger = slog.New(config.LogHandler)
+	}
 	iface := NewInterface(logger)
 	device, dialer, err := iface.Start(ctx, localAddress)
 	if err != nil {
@@ -39,7 +70,7 @@ func startInterface(ctx context.Context, logger *slog.Logger, localAddress netip
 	}()
 
 	var configBuffer bytes.Buffer
-	writeConfig(&configBuffer, config)
+	writeConfig(&configBuffer, wgConfig)
 	if err := device.IpcSetOperation(&configBuffer); err != nil {
 		return nil, err
 	}
@@ -47,61 +78,6 @@ func startInterface(ctx context.Context, logger *slog.Logger, localAddress netip
 		return nil, err
 	}
 	return dialer, nil
-}
-
-func StartServer(ctx context.Context, logger *slog.Logger, addr netip.AddrPort, privateKey wgtypes.Key, peerPublicKey wgtypes.Key) (*netstack.Net, error) {
-	dialer, connectErr := startInterface(ctx, logger, addr.Addr(), wgtypes.Config{
-		PrivateKey: toPointer(privateKey),
-		ListenPort: toPointer(int(addr.Port())),
-		Peers: []wgtypes.PeerConfig{
-			{
-				PublicKey: peerPublicKey,
-				AllowedIPs: []net.IPNet{
-					{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)},
-				},
-			},
-		},
-	})
-	if connectErr != nil {
-		return nil, connectErr
-	}
-	listener, err := dialer.ListenTCP(&net.TCPAddr{Port: 80})
-	if err != nil {
-		return nil, err
-	}
-	server := http.Server{
-		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			fmt.Printf("> %s - %s - %s\n", request.RemoteAddr, request.URL.String(), request.UserAgent())
-			io.WriteString(writer, "Hello from userspace TCP!")
-		}),
-	}
-	if err := server.Serve(listener); err != nil {
-		return nil, err
-	}
-	return dialer, nil
-}
-
-func StartClient(ctx context.Context, logger *slog.Logger, addr netip.Addr, privateKey wgtypes.Key, peerAddr netip.AddrPort, peerPublicKey wgtypes.Key) (*http.Client, error) {
-	dialer, connectErr := startInterface(ctx, logger, addr, wgtypes.Config{
-		PrivateKey: toPointer(privateKey),
-		Peers: []wgtypes.PeerConfig{
-			{
-				PublicKey: peerPublicKey,
-				Endpoint:  net.UDPAddrFromAddrPort(peerAddr),
-				AllowedIPs: []net.IPNet{
-					{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)},
-				},
-			},
-		},
-	})
-	if connectErr != nil {
-		return nil, connectErr
-	}
-	return &http.Client{
-		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
-		},
-	}, nil
 }
 
 func writeConfig(w io.Writer, cfg wgtypes.Config) {
