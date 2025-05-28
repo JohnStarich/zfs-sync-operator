@@ -6,23 +6,32 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
-	"fmt"
 	"io"
 	"net"
 	"net/netip"
-	"os/exec"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 )
 
 const rsaKeyBits = 2048
 
-func TestServer(tb testing.TB) (user, privateKey string, address netip.AddrPort) {
+type TestConfig struct {
+	ExecResults map[string]TestExecResult
+}
+
+type TestExecResult struct {
+	ExpectStdin []byte
+	Stdout      []byte
+	Stderr      []byte
+	ExitCode    int
+}
+
+func TestServer(tb testing.TB, config TestConfig) (user, privateKey string, address netip.AddrPort) {
 	tb.Helper()
 	rsaPrivateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
 	require.NoError(tb, err)
@@ -37,13 +46,13 @@ func TestServer(tb testing.TB) (user, privateKey string, address netip.AddrPort)
 		require.NoError(tb, listener.Close())
 	})
 	user = "some-user"
-	go run(tb, listener, user, rsaPrivateKey.Public())
+	go run(tb, listener, user, rsaPrivateKey.Public(), config)
 	return user, privateKey, listener.Addr().(*net.TCPAddr).AddrPort()
 }
 
 const publicKeyFingerprintExtension = "pubkey-fp"
 
-func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKey crypto.PublicKey) {
+func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKey crypto.PublicKey, config TestConfig) {
 	tb.Helper()
 	publicKey, err := ssh.NewPublicKey(clientPublicKey)
 	require.NoError(tb, err)
@@ -78,7 +87,7 @@ func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKe
 		require.NoError(tb, err)
 		go func() {
 			defer netConn.Close()
-			handleConn(tb, netConn, &serverConfig)
+			handleConn(tb, netConn, &serverConfig, config)
 		}()
 	}
 }
@@ -95,11 +104,7 @@ type exitStatusRequest struct {
 	Status uint32
 }
 
-type exitErrorCoder interface {
-	ExitCode() int
-}
-
-func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig) {
+func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig, config TestConfig) {
 	conn, chans, reqs, err := ssh.NewServerConn(netConn, serverConfig)
 	require.NoError(tb, err)
 	tb.Logf("Logged in with key fingerprint: %s", conn.Permissions.Extensions[publicKeyFingerprintExtension])
@@ -132,14 +137,8 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig)
 						channel.Close()
 						wg.Done()
 					}()
-					execErr := handleExecRequest(command.Command, channel, channel, channel.Stderr())
-					if execErr != nil {
-						fmt.Fprintln(channel.Stderr(), execErr)
-					}
-					var exitStatus exitStatusRequest
-					if exitErr := exitErrorCoder(nil); errors.As(execErr, &exitErr) {
-						exitStatus.Status = uint32(exitErr.ExitCode())
-					}
+					exitCode := handleExecRequest(tb, command.Command, channel, channel, channel.Stderr(), config)
+					exitStatus := exitStatusRequest{Status: uint32(exitCode)}
 					_, err := channel.SendRequest(exitStatusRequestName, false, ssh.Marshal(exitStatus))
 					require.NoError(tb, err)
 				}(req)
@@ -150,14 +149,19 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig)
 	}
 }
 
-func handleExecRequest(command string, stdin io.Reader, stdout, stderr io.Writer) error {
-	args := strings.Split(command, " ")
-	if len(args) == 0 {
-		return errors.Errorf("command must have at least 1 argument, got 0: %q", command)
+func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, stderr io.Writer, config TestConfig) int {
+	result, hasResult := config.ExecResults[command]
+	if !hasResult {
+		tb.Fatal("Unexpected exec command:", command)
 	}
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = stdin
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	return cmd.Run()
+	if len(result.ExpectStdin) > 0 {
+		stdinBytes, err := io.ReadAll(stdin)
+		require.NoError(tb, err)
+		assert.EqualValues(tb, result.ExpectStdin, stdinBytes)
+	}
+	_, err := stdout.Write(result.Stdout)
+	require.NoError(tb, err)
+	_, err = stderr.Write(result.Stderr)
+	require.NoError(tb, err)
+	return result.ExitCode
 }

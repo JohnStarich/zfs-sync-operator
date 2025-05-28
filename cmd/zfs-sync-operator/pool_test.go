@@ -16,7 +16,13 @@ import (
 func TestPool(t *testing.T) {
 	t.Parallel()
 	run := RunTest(t)
-	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t)
+	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{
+		ExecResults: map[string]ssh.TestExecResult{
+			"/usr/bin/echo Hello, World!": {
+				Stdout: []byte("Hello, World!\n"),
+			},
+		},
+	})
 	const (
 		sshSecretName         = "ssh"
 		sshPrivateKeySelector = "private-key"
