@@ -41,12 +41,19 @@ func (p *Pool) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(p) 
 
 // Spec defines the connection details for a [Pool], including WireGuard and SSH
 type Spec struct {
+	SSH       *SSHSpec       `json:"ssh"`
 	WireGuard *WireGuardSpec `json:"wireguard,omitempty"`
+}
+
+type SSHSpec struct {
+	User       string                   `json:"user"`
+	Address    netip.AddrPort           `json:"address"`
+	PrivateKey corev1.SecretKeySelector `json:"privateKey"`
 }
 
 type WireGuardSpec struct {
 	DNSAddresses  []netip.Addr              `json:"dnsAddresses,omitempty"`
-	PeerAddr      *netip.AddrPort           `json:"peerAddress"`
+	PeerAddress   netip.AddrPort            `json:"peerAddress"`
 	PeerPublicKey corev1.SecretKeySelector  `json:"peerPublicKey"`
 	PresharedKey  *corev1.SecretKeySelector `json:"presharedKey,omitempty"`
 	PrivateKey    corev1.SecretKeySelector  `json:"privateKey"`

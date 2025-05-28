@@ -37,6 +37,7 @@ type TestRunConfig struct {
 
 func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 	tb.Helper()
+	// TODO shutdown properly when test times out and gets killed
 	ctx, cancel := context.WithCancel(TestEnv.Context())
 	shutdownCtx, shutdownComplete := context.WithCancel(context.Background())
 	tb.Cleanup(func() {

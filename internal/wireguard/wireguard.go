@@ -18,7 +18,7 @@ type Config struct {
 	DNSAddresses  []netip.Addr    // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
 	ListenPort    int             // Optional: The port number to listen for WireGuard connections.
 	LogHandler    slog.Handler    // Defaults to slog.Default().
-	PeerAddr      *netip.AddrPort // Optional: The address to connect to a remote WireGuard peer.
+	PeerAddress   *netip.AddrPort // Optional: The address to connect to a remote WireGuard peer.
 	PeerPublicKey []byte
 	PresharedKey  []byte // Optional, but highly recommended.
 	PrivateKey    []byte
@@ -33,9 +33,9 @@ func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*nets
 	if len(config.PresharedKey) > 0 {
 		presharedKey = toPointer(wgtypes.Key(config.PresharedKey))
 	}
-	var endpoint *net.UDPAddr
-	if config.PeerAddr != nil {
-		endpoint = net.UDPAddrFromAddrPort(*config.PeerAddr)
+	var address *net.UDPAddr
+	if config.PeerAddress != nil {
+		address = net.UDPAddrFromAddrPort(*config.PeerAddress)
 	}
 	wgConfig := wgtypes.Config{
 		PrivateKey:   toPointer(wgtypes.Key(config.PrivateKey)),
@@ -45,7 +45,7 @@ func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*nets
 			{
 				PublicKey:         wgtypes.Key(config.PeerPublicKey),
 				PresharedKey:      presharedKey,
-				Endpoint:          endpoint,
+				Endpoint:          address,
 				ReplaceAllowedIPs: true,
 				AllowedIPs: []net.IPNet{
 					{IP: net.ParseIP("0.0.0.0"), Mask: net.CIDRMask(0, 32)},

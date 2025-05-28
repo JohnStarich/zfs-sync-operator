@@ -82,7 +82,7 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 		PresharedKey:  presharedKey[:],
 		PrivateKey:    privateKey[:],
 		PeerPublicKey: peerPublicKey[:],
-		PeerAddr:      &peerAddr,
+		PeerAddress:   &peerAddr,
 	})
 	require.NoError(t, err)
 	return &http.Client{

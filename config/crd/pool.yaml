@@ -20,6 +20,20 @@ spec:
           spec:
             type: object
             properties:
+              ssh:
+                type: object
+                properties:
+                  user:
+                    type: string
+                  address:
+                    type: string
+                  privateKey:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      key:
+                        type: string
               wireguard:
                 type: object
                 properties:
