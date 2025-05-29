@@ -23,7 +23,7 @@ func TestPool(t *testing.T) {
 	)
 	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{
 		ExecResults: map[string]ssh.TestExecResult{
-			fmt.Sprintf(`"/usr/sbin/zpool" "status" %q`, foundPool): {
+			fmt.Sprintf(`/usr/sbin/zpool status %s`, foundPool): {
 				Stdout: []byte(fmt.Sprintf(`
   pool: %[1]s
  state: ONLINE
@@ -41,7 +41,7 @@ config:
 `, foundPool)),
 				ExitCode: 0,
 			},
-			fmt.Sprintf(`"/usr/sbin/zpool" "status" %q`, notFoundPool): {
+			fmt.Sprintf(`/usr/sbin/zpool status %s`, notFoundPool): {
 				Stdout:   []byte(fmt.Sprintf("cannot open '%[1]s': no such pool\n", notFoundPool)),
 				ExitCode: 1,
 			},
@@ -104,6 +104,6 @@ config:
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Error", pool.Status.State)
-		assert.Equal(collect, fmt.Sprintf(`failed to run '"/usr/sbin/zpool" "status" %[1]q': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
+		assert.Equal(collect, fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
 	}, 1*time.Second, 10*time.Millisecond)
 }

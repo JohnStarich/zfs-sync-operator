@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
@@ -158,14 +158,33 @@ func (r *Reconciler) getSecretKey(ctx context.Context, currentNamespace string, 
 }
 
 func safelyFormatCommand(name string, args ...string) string {
-	// TODO avoid shell evaluation, like $
 	var b strings.Builder
-	b.WriteString(strconv.Quote(name))
+	b.WriteString(shellQuote(name))
 	for _, arg := range args {
 		b.WriteRune(' ')
-		b.WriteString(strconv.Quote(arg))
+		b.WriteString(shellQuote(arg))
 	}
 	return b.String()
+}
+
+func shellQuote(str string) string {
+	var builder strings.Builder
+	for _, r := range str {
+		if shouldQuote(r) {
+			const escapeBackslash = '\\'
+			builder.WriteRune(escapeBackslash)
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
+}
+
+// shouldQuote conservatively quotes most runes, save some basic readability of ASCII compatible runes
+func shouldQuote(r rune) bool {
+	if r > unicode.MaxASCII {
+		return true
+	}
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '/'
 }
 
 func stateFieldFromZpoolStatus(status []byte) string {
