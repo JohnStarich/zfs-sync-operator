@@ -41,6 +41,7 @@ func (p *Pool) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(p) 
 
 // Spec defines the connection details for a [Pool], including WireGuard and SSH
 type Spec struct {
+	Name      string         `json:"name"`
 	SSH       *SSHSpec       `json:"ssh"`
 	WireGuard *WireGuardSpec `json:"wireguard,omitempty"`
 }
@@ -61,7 +62,8 @@ type WireGuardSpec struct {
 
 // Status holds status information for a [Pool]
 type Status struct {
-	State string `json:"state,omitempty"`
+	State  string `json:"state,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // PoolList is a list of [Pool]. Required to perform a Watch.

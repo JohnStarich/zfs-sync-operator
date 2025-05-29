@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,10 +17,33 @@ import (
 func TestPool(t *testing.T) {
 	t.Parallel()
 	run := RunTest(t)
+	const (
+		foundPool    = "mypool"
+		notFoundPool = "mynotfoundpool"
+	)
 	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{
 		ExecResults: map[string]ssh.TestExecResult{
-			"/usr/bin/echo Hello, World!": {
-				Stdout: []byte("Hello, World!\n"),
+			fmt.Sprintf(`"/usr/sbin/zpool" "status" %q`, foundPool): {
+				Stdout: []byte(fmt.Sprintf(`
+  pool: %[1]s
+ state: ONLINE
+config:
+
+        NAME                        STATE     READ WRITE CKSUM
+        %[1]s                       ONLINE       0     0     0
+          raidz2-0                  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+
+ errors: No known data errors
+`, foundPool)),
+				ExitCode: 0,
+			},
+			fmt.Sprintf(`"/usr/sbin/zpool" "status" %q`, notFoundPool): {
+				Stdout:   []byte(fmt.Sprintf("cannot open '%[1]s': no such pool\n", notFoundPool)),
+				ExitCode: 1,
 			},
 		},
 	})
@@ -33,9 +57,10 @@ func TestPool(t *testing.T) {
 			sshPrivateKeySelector: sshPrivateKey,
 		},
 	}))
-	pool := zfspool.Pool{
-		ObjectMeta: metav1.ObjectMeta{Name: "mypool", Namespace: run.Namespace},
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
 		Spec: zfspool.Spec{
+			Name: foundPool,
 			SSH: &zfspool.SSHSpec{
 				User:    sshUser,
 				Address: sshAddr,
@@ -47,13 +72,38 @@ func TestPool(t *testing.T) {
 				},
 			},
 		},
-	}
-	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &pool))
-	pool = zfspool.Pool{
-		ObjectMeta: metav1.ObjectMeta{Name: "mypool", Namespace: run.Namespace},
-	}
+	}))
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		pool := zfspool.Pool{
+			ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
+		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-		assert.Equal(collect, "Hello, World!\n", pool.Status.State)
+		assert.Equal(collect, "Online", pool.Status.State)
+		assert.Equal(collect, "", pool.Status.Reason)
+	}, 1*time.Second, 10*time.Millisecond)
+
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
+		Spec: zfspool.Spec{
+			Name: notFoundPool,
+			SSH: &zfspool.SSHSpec{
+				User:    sshUser,
+				Address: sshAddr,
+				PrivateKey: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: sshSecretName,
+					},
+					Key: sshPrivateKeySelector,
+				},
+			},
+		},
+	}))
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		pool := zfspool.Pool{
+			ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
+		}
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
+		assert.Equal(collect, "Error", pool.Status.State)
+		assert.Equal(collect, fmt.Sprintf(`failed to run '"/usr/sbin/zpool" "status" %[1]q': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
 	}, 1*time.Second, 10*time.Millisecond)
 }

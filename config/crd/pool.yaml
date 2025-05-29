@@ -20,6 +20,8 @@ spec:
           spec:
             type: object
             properties:
+              name:
+                type: string
               ssh:
                 type: object
                 properties:
@@ -69,8 +71,13 @@ spec:
             properties:
               state:
                 type: string
+              reason:
+                type: string
     selectableFields: []
     additionalPrinterColumns:
+    - jsonPath: .spec.name
+      name: Pool Name
+      type: string
     - jsonPath: .status.state
       name: Status
       type: string

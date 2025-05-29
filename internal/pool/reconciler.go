@@ -1,10 +1,14 @@
 package pool
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
+	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
@@ -93,11 +97,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	// An SSH client is represented with a ClientConn.
-	//
-	// To authenticate with the remote server you must pass at least one
-	// implementation of AuthMethod via the Auth field in ClientConfig,
-	// and provide a HostKeyCallback.
 	config := ssh.ClientConfig{
 		User:            pool.Spec.SSH.User,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
@@ -114,13 +113,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 	defer session.Close()
-	var commandOutput bytes.Buffer
-	session.Stdout = &commandOutput
-	if err := session.Run("/usr/bin/echo Hello, World!"); err != nil {
-		return reconcile.Result{}, errors.WithMessagef(err, "command failed with output '%s'", commandOutput.String())
+	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
+	zpoolStatus, err := session.CombinedOutput(command)
+	if err != nil {
+		zpoolStatusStr := strings.TrimSpace(string(zpoolStatus))
+		logger.Error(err, "command failed", "output", zpoolStatusStr)
+		pool.Status.State = "Error"
+		pool.Status.Reason = fmt.Sprintf(`failed to run '%s': %s`, command, zpoolStatusStr)
+		return reconcile.Result{}, r.client.Update(ctx, &pool)
 	}
+	stateField := stateFieldFromZpoolStatus(zpoolStatus)
+	logger.Info("pool connection was successful", "state", stateField)
+	pool.Status.State = stateFromStateField(stateField)
 
-	pool.Status.State = commandOutput.String()
 	if err := r.client.Update(ctx, &pool); err != nil {
 		return reconcile.Result{}, err
 	}
@@ -150,4 +155,42 @@ func (r *Reconciler) getSecretKey(ctx context.Context, currentNamespace string, 
 		return nil, errors.Errorf("secret %q does not contain key %q", selector.Name, selector.Key)
 	}
 	return data, nil
+}
+
+func safelyFormatCommand(name string, args ...string) string {
+	// TODO avoid shell evaluation, like $
+	var b strings.Builder
+	b.WriteString(strconv.Quote(name))
+	for _, arg := range args {
+		b.WriteRune(' ')
+		b.WriteString(strconv.Quote(arg))
+	}
+	return b.String()
+}
+
+func stateFieldFromZpoolStatus(status []byte) string {
+	status = bytes.TrimSpace(status) // remove leading blank lines, if any
+	scanner := bufio.NewScanner(bytes.NewReader(status))
+	for scanner.Scan() {
+		line := scanner.Text()
+		tokens := strings.Fields(line)
+		if len(tokens) != 2 { // stop at break point between fields and vdev list
+			break
+		}
+		field, value := tokens[0], tokens[1]
+		if field == "state:" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stateFromStateField(state string) string {
+	switch state {
+	case "ONLINE":
+		return "Online"
+	default:
+		// TODO handle all known zpool states
+		return "Unknown"
+	}
 }
