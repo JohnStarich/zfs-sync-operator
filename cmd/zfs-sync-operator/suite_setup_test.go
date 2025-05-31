@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -18,6 +19,10 @@ import (
 var TestEnv *envtestrunner.Runner //nolint:gochecknoglobals // The test environment is very expensive to set up, so this performance optimization is required for fast test execution.
 
 func TestMain(m *testing.M) {
+	flag.Parse()
+	if testing.Short() {
+		return
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	TestEnv = envtestrunner.New(ctx, m.Run, mustNewScheme())
