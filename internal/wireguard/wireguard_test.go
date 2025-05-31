@@ -3,12 +3,14 @@ package wireguard
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"testing"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -79,6 +81,7 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	dialer, err := Connect(ctx, addr, Config{
+		LogHandler:    slog.NewTextHandler(testlog.NewWriter(t), nil),
 		PresharedKey:  presharedKey[:],
 		PrivateKey:    privateKey[:],
 		PeerPublicKey: peerPublicKey[:],

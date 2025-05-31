@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
+	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,7 +63,7 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 
 	operator, err := New(ctx, TestEnv.RESTConfig(), Config{
 		Namespace:         namespace,
-		Out:               envtestrunner.NewWriter(tb),
+		Out:               testlog.NewWriter(tb),
 		MetricsPort:       "0",
 		idempotentMetrics: true,
 	})

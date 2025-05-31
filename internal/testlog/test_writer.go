@@ -1,6 +1,7 @@
-package envtestrunner
+package testlog
 
 import (
+	"bytes"
 	"io"
 	"sync/atomic"
 )
@@ -29,6 +30,7 @@ func (w *Writer) cleanUp() {
 }
 
 func (w *Writer) Write(b []byte) (int, error) {
+	b = bytes.TrimRight(b, "\n")
 	return (*w.writer.Load()).Write(b)
 }
 
