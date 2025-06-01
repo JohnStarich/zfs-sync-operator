@@ -39,6 +39,6 @@ type testWriter struct {
 }
 
 func (w testWriter) Write(b []byte) (int, error) {
-	w.testingTB.Log(string(b))
+	logWithShortFileName(w.testingTB, string(b))
 	return len(b), nil
 }
