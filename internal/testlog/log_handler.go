@@ -1,9 +1,12 @@
 package testlog
 
 import (
+	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -11,9 +14,10 @@ import (
 )
 
 func NewLogHandler(tb testing.TB) *slog.TextHandler {
-	testWriter := NewWriter(tb)
+	var writer io.Writer = NewWriter(tb)
+	writer = &unrollQuotedMultiLineStringsWriter{writer: writer}
 	moduleDirPrefix := filepath.Join(currentFile(tb), "..", "..", "..") + string(filepath.Separator)
-	return slog.NewTextHandler(testWriter, &slog.HandlerOptions{
+	return slog.NewTextHandler(writer, &slog.HandlerOptions{
 		AddSource: true,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if len(groups) > 0 {
@@ -31,6 +35,12 @@ func NewLogHandler(tb testing.TB) *slog.TextHandler {
 					source.File = strings.TrimPrefix(source.File, moduleDirPrefix)
 				}
 				return a
+			case "err":
+				switch err := a.Value.Any().(type) {
+				case error:
+					a.Value = slog.StringValue(fmt.Sprintf("%+v", err))
+				}
+				return a
 			default:
 				return a
 			}
@@ -44,4 +54,27 @@ func currentFile(tb testing.TB) string {
 	absoluteFilePath, err := filepath.Abs(file)
 	require.NoError(tb, err)
 	return absoluteFilePath
+}
+
+type unrollQuotedMultiLineStringsWriter struct {
+	writer io.Writer
+}
+
+func (w *unrollQuotedMultiLineStringsWriter) Write(b []byte) (int, error) {
+	b = []byte(unquoteStringsInline(string(b), "\n"))
+	return w.writer.Write(b)
+}
+
+func unquoteStringsInline(s, mustContain string) string {
+	const separator = "="
+	quotedCandidates := strings.SplitAfter(s, separator)
+	for i, candidate := range quotedCandidates {
+		if quoted, err := strconv.QuotedPrefix(candidate); err == nil {
+			unquoted, err := strconv.Unquote(quoted)
+			if err == nil && strings.Contains(unquoted, mustContain) {
+				quotedCandidates[i] = unquoted + candidate[len(quoted):]
+			}
+		}
+	}
+	return strings.Join(quotedCandidates, "")
 }
