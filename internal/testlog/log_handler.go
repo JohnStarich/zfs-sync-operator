@@ -25,9 +25,9 @@ func NewLogHandler(tb testing.TB) *slog.TextHandler {
 				return a
 			}
 			switch a.Key {
-			case "time", "level":
+			case slog.TimeKey, slog.LevelKey:
 				return slog.Attr{}
-			case "source":
+			case slog.SourceKey:
 				switch source := a.Value.Any().(type) {
 				case *slog.Source:
 					if !strings.HasPrefix(source.File, moduleDirPrefix) {
