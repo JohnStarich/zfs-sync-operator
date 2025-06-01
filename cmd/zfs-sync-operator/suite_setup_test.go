@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -66,9 +67,13 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 		tb.Fatal(err)
 	}
 
+	level := slog.LevelInfo
+	if testing.Verbose() {
+		level = slog.LevelDebug
+	}
 	operator, err := New(ctx, TestEnv.RESTConfig(), Config{
 		Namespace:         namespace,
-		LogHandler:        testlog.NewLogHandler(tb),
+		LogHandler:        testlog.NewLogHandler(tb, level),
 		MetricsPort:       "0",
 		idempotentMetrics: true,
 	})

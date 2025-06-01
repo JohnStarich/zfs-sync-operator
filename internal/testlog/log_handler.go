@@ -13,13 +13,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func NewLogHandler(tb testing.TB) *slog.TextHandler {
+func NewLogHandler(tb testing.TB, level slog.Level) *slog.TextHandler {
 	var writer io.Writer = NewWriter(tb)
 	writer = &unrollQuotedMultiLineStringsWriter{writer: writer}
 	moduleDirPrefix := filepath.Join(currentFile(tb), "..", "..", "..") + string(filepath.Separator)
 	return slog.NewTextHandler(writer, &slog.HandlerOptions{
 		AddSource: true,
-		Level:     slog.LevelDebug,
+		Level:     level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if len(groups) > 0 {
 				return a
