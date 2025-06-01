@@ -24,7 +24,7 @@ func TestPool(t *testing.T) {
 	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{
 		ExecResults: map[string]ssh.TestExecResult{
 			fmt.Sprintf(`/usr/sbin/zpool status %s`, foundPool): {
-				Stdout: []byte(fmt.Sprintf(`
+				Stdout: fmt.Appendf(nil, `
   pool: %[1]s
  state: ONLINE
 config:
@@ -38,11 +38,11 @@ config:
             wwn-0x0000000000000000  ONLINE       0     0     0
 
  errors: No known data errors
-`, foundPool)),
+`, foundPool),
 				ExitCode: 0,
 			},
 			fmt.Sprintf(`/usr/sbin/zpool status %s`, notFoundPool): {
-				Stdout:   []byte(fmt.Sprintf("cannot open '%[1]s': no such pool\n", notFoundPool)),
+				Stdout:   fmt.Appendf(nil, "cannot open '%[1]s': no such pool\n", notFoundPool),
 				ExitCode: 1,
 			},
 		},
