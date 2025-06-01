@@ -68,7 +68,7 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 
 	operator, err := New(ctx, TestEnv.RESTConfig(), Config{
 		Namespace:         namespace,
-		Out:               testlog.NewWriter(tb),
+		LogHandler:        testlog.NewLogHandler(tb),
 		MetricsPort:       "0",
 		idempotentMetrics: true,
 	})

@@ -52,8 +52,8 @@ func runWithArgs(ctx context.Context, args []string, out io.Writer) error {
 	}
 	const operatorNamespace = "zfs-sync-operator-system"
 	o, err := New(ctx, restConfig, Config{
-		Namespace: operatorNamespace,
-		Out:       out,
+		LogHandler: slog.NewJSONHandler(out, nil),
+		Namespace:  operatorNamespace,
 	})
 	if err != nil {
 		return err
@@ -79,9 +79,9 @@ type Operator struct {
 }
 
 type Config struct {
-	Namespace         string
-	Out               io.Writer
+	LogHandler        slog.Handler
 	MetricsPort       string
+	Namespace         string
 	idempotentMetrics bool // disables safety checks for double metrics registrations
 }
 
@@ -90,7 +90,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if c.MetricsPort == "" {
 		c.MetricsPort = "8080"
 	}
-	logger := logr.FromSlogHandler(slog.NewJSONHandler(c.Out, nil))
+	logger := logr.FromSlogHandler(c.LogHandler)
 
 	mgr, err := manager.New(restConfig, manager.Options{
 		LeaderElection:                true,
