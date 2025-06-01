@@ -29,20 +29,16 @@ func TestConnectToHTTPServer(t *testing.T) {
 	require.NoError(t, err)
 	clientPublicKey := clientPrivateKey.PublicKey()
 
-	const (
-		serverVPNAddr  = "192.168.4.29"
-		serverRealAddr = "127.0.0.1"
-		serverVPNPort  = 58120
-	)
+	const serverVPNAddr = "192.168.4.29"
 	const someMessage = "Hello, World!"
-	go startServer(t, netip.AddrPortFrom(netip.MustParseAddr(serverVPNAddr), serverVPNPort), presharedKey, serverPrivateKey, clientPublicKey, someMessage)
+	serverAddr := startHTTPServer(t, netip.MustParseAddr(serverVPNAddr), presharedKey, serverPrivateKey, clientPublicKey, someMessage)
 	serverHTTPURL := url.URL{
 		Scheme: "http",
 		Host:   serverVPNAddr,
 	}
 
 	const clientVPNAddr = "192.168.4.28"
-	httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, clientPrivateKey, serverPublicKey, netip.AddrPortFrom(netip.MustParseAddr(serverRealAddr), serverVPNPort))
+	httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, clientPrivateKey, serverPublicKey, serverAddr)
 	resp, err := httpClient.Get(serverHTTPURL.String())
 	require.NoError(t, err)
 	body, err := io.ReadAll(resp.Body)
@@ -50,18 +46,9 @@ func TestConnectToHTTPServer(t *testing.T) {
 	assert.Equal(t, someMessage, string(body))
 }
 
-func startServer(t *testing.T, addr netip.AddrPort, presharedKey, privateKey, peerPublicKey wgtypes.Key, message string) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	dialer, err := Connect(ctx, addr.Addr(), Config{
-		PresharedKey:  presharedKey[:],
-		PrivateKey:    privateKey[:],
-		PeerPublicKey: peerPublicKey[:],
-		ListenPort:    int(addr.Port()),
-	})
-	require.NoError(t, err)
-	listener, err := dialer.ListenTCP(&net.TCPAddr{Port: 80})
+func startHTTPServer(t *testing.T, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key, message string) netip.AddrPort {
+	serverNet, addrPort := StartTestServer(t, addr, presharedKey, privateKey, peerPublicKey)
+	listener, err := serverNet.ListenTCP(&net.TCPAddr{Port: 80})
 	require.NoError(t, err)
 
 	server := http.Server{
@@ -70,18 +57,19 @@ func startServer(t *testing.T, addr netip.AddrPort, presharedKey, privateKey, pe
 			io.WriteString(w, message)
 		}),
 	}
-	require.NoError(t, server.Serve(listener))
 	t.Cleanup(func() {
 		require.NoError(t, server.Close())
 	})
+	go server.Serve(listener)
+	return addrPort
 }
 
 func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key, peerAddr netip.AddrPort) *http.Client {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	dialer, err := Connect(ctx, addr, Config{
-		LogHandler:    slog.NewTextHandler(testlog.NewWriter(t), nil),
+	clientNet, err := Connect(ctx, addr, Config{
+		LogHandler:    testlog.NewLogHandler(t, slog.LevelDebug),
 		PresharedKey:  presharedKey[:],
 		PrivateKey:    privateKey[:],
 		PeerPublicKey: peerPublicKey[:],
@@ -90,7 +78,7 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 	require.NoError(t, err)
 	return &http.Client{
 		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
+			DialContext: clientNet.DialContext,
 		},
 	}
 }

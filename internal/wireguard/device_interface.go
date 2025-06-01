@@ -49,7 +49,7 @@ func (i *DeviceInterface) Start(ctx context.Context) (*wgdevice.Device, *netstac
 	logger := newLastErrorsLogger(maxDeviceErrors, "wireguard device")
 	device := wgdevice.NewDevice(tunDevice, conn.NewDefaultBind(), &wgdevice.Logger{
 		Verbosef: func(format string, args ...any) {
-			i.logger.Info(fmt.Sprintf(format, args...))
+			i.logger.Debug(fmt.Sprintf(format, args...))
 		},
 		Errorf: func(format string, args ...any) {
 			i.logger.Error(fmt.Sprintf(format, args...))
