@@ -21,6 +21,7 @@ import (
 const rsaKeyBits = 2048
 
 type TestConfig struct {
+	Listener    net.Listener // Defaults to a TCP listener on an unused port.
 	ExecResults map[string]TestExecResult
 }
 
@@ -31,6 +32,7 @@ type TestExecResult struct {
 	ExitCode    int
 }
 
+// TestServer starts an SSH server and returns the user and private key to use
 func TestServer(tb testing.TB, config TestConfig) (user, privateKey string, address netip.AddrPort) {
 	tb.Helper()
 	rsaPrivateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
@@ -40,14 +42,20 @@ func TestServer(tb testing.TB, config TestConfig) (user, privateKey string, addr
 		Bytes: x509.MarshalPKCS1PrivateKey(rsaPrivateKey),
 	}))
 
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
-	require.NoError(tb, err)
-	tb.Cleanup(func() {
-		require.NoError(tb, listener.Close())
-	})
+	if config.Listener == nil {
+		listener, err := net.Listen("tcp", "0.0.0.0:0")
+		require.NoError(tb, err)
+		tb.Cleanup(func() {
+			require.NoError(tb, listener.Close())
+		})
+		config.Listener = listener
+	}
+	tcpAddress, isTCPAddress := config.Listener.Addr().(*net.TCPAddr)
+	require.True(tb, isTCPAddress, "Listener address must have a port")
+	address = tcpAddress.AddrPort()
 	user = "some-user"
-	go run(tb, listener, user, rsaPrivateKey.Public(), config)
-	return user, privateKey, listener.Addr().(*net.TCPAddr).AddrPort()
+	go run(tb, config.Listener, user, rsaPrivateKey.Public(), config)
+	return user, privateKey, address
 }
 
 const publicKeyFingerprintExtension = "pubkey-fp"
