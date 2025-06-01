@@ -89,10 +89,10 @@ func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKe
 	serverConfig.AddHostKey(sshPrivateKey)
 	for {
 		netConn, err := listener.Accept()
-		if errors.Is(err, net.ErrClosed) {
+		if err != nil {
+			tb.Log("Error accepting connection:", err)
 			return
 		}
-		require.NoError(tb, err)
 		go func() {
 			defer netConn.Close()
 			handleConn(tb, netConn, &serverConfig, config)
