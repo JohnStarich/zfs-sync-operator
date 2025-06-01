@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"fmt"
 	"net"
 	"net/netip"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/go-logr/logr"
@@ -39,33 +39,58 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err := r.client.Get(ctx, request.NamespacedName, &pool); err != nil {
 		return reconcile.Result{}, err
 	}
-	logger.Info("got pool", "pool", pool)
+	logger.Info("got pool", "status", pool.Status, "pool", pool.Spec)
+	if pool.Status.State == "Online" { // TODO verify nothing has changed
+		// TODO can we ignore status field changes? only ack spec or secret updates?
+		return reconcile.Result{}, nil
+	}
+	state, err := r.reconcile(ctx, pool)
+	if err == nil {
+		logger.Info("pool detected successfully")
+		pool.Status.State = stateFromStateField(state)
+		pool.Status.Reason = ""
+	} else {
+		logger.Error(err, "reconcile failed")
+		pool.Status.State = "Error"
+		pool.Status.Reason = err.Error()
+	}
+	return reconcile.Result{}, r.client.Update(ctx, &pool)
+}
+
+const MaxReconcileWait = 10 * time.Second
+
+func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
+	defer func() { returnedErr = errors.WithStack(returnedErr) }()
+	ctx, cancel := context.WithTimeout(ctx, MaxReconcileWait)
+	defer cancel()
+	logger := log.FromContext(ctx)
 
 	if pool.Spec.SSH == nil {
-		return reconcile.Result{}, errors.New("ssh is required")
+		return "", errors.New("ssh is required")
 	}
 
+	sshAddress := pool.Spec.SSH.Address
 	var conn net.Conn
 	if wireGuardSpec := pool.Spec.WireGuard; wireGuardSpec != nil {
 		// TODO report status on error
-		peerPublicKey, err := r.getSecretKey(ctx, request.Namespace, wireGuardSpec.PeerPublicKey)
+		peerPublicKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PeerPublicKey)
 		if err != nil {
-			return reconcile.Result{}, errors.WithMessage(err, "wireguard peer public key")
+			return "", errors.WithMessage(err, "wireguard peer public key")
 		}
-		privateKey, err := r.getSecretKey(ctx, request.Namespace, wireGuardSpec.PrivateKey)
+		privateKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PrivateKey)
 		if err != nil {
-			return reconcile.Result{}, errors.WithMessage(err, "wireguard private key")
+			return "", errors.WithMessage(err, "wireguard private key")
 		}
 		var presharedKey []byte
 		if wireGuardSpec.PresharedKey != nil {
-			presharedKey, err = r.getSecretKey(ctx, request.Namespace, *wireGuardSpec.PresharedKey)
+			presharedKey, err = r.getSecretKey(ctx, pool.Namespace, *wireGuardSpec.PresharedKey)
 			if err != nil {
-				return reconcile.Result{}, errors.WithMessage(err, "wireguard preshared key")
+				return "", errors.WithMessage(err, "wireguard preshared key")
 			}
 		}
 
 		localAddr := arbitraryUnusedIP(wireGuardSpec.PeerAddress.Addr())
-		net, err := wireguard.Connect(ctx, localAddr, wireguard.Config{
+		wireGuardNet, err := wireguard.Connect(ctx, localAddr, wireguard.Config{
 			DNSAddresses:  wireGuardSpec.DNSAddresses,
 			LogHandler:    logr.ToSlogHandler(logger),
 			PeerAddress:   &wireGuardSpec.PeerAddress,
@@ -74,62 +99,57 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 			PrivateKey:    privateKey,
 		})
 		if err != nil {
-			return reconcile.Result{}, err
+			return "", err
 		}
-		conn, err = net.DialContextTCPAddrPort(ctx, pool.Spec.SSH.Address)
+		logger.Info("Dialed WireGuard peer", "peer", wireGuardSpec.PeerAddress, "local ip", localAddr)
+		conn, err = wireGuardNet.DialContextTCPAddrPort(ctx, sshAddress)
 		if err != nil {
-			return reconcile.Result{}, err
+			return "", errors.WithMessagef(err, "failed to dial SSH server %q over WireGuard", sshAddress)
 		}
+		logger.Info("Dialed SSH server over WireGuard", "address", sshAddress)
 	} else {
+		var dialer net.Dialer
 		var err error
-		conn, err = net.Dial("tcp", pool.Spec.SSH.Address.String())
+		conn, err = dialer.DialContext(ctx, "tcp", sshAddress.String())
 		if err != nil {
-			return reconcile.Result{}, err
+			return "", errors.WithMessagef(err, "failed to dial SSH server %q directly", sshAddress)
 		}
+		logger.Info("Dialed SSH server directly", "address", sshAddress)
 	}
 	defer conn.Close()
 
-	sshPrivateKey, err := r.getSecretKey(ctx, request.Namespace, pool.Spec.SSH.PrivateKey)
+	sshPrivateKey, err := r.getSecretKey(ctx, pool.Namespace, pool.Spec.SSH.PrivateKey)
 	if err != nil {
-		return reconcile.Result{}, err
+		return "", err
 	}
 	signer, err := ssh.ParsePrivateKey(sshPrivateKey)
 	if err != nil {
-		return reconcile.Result{}, err
+		return "", err
 	}
 	config := ssh.ClientConfig{
 		User:            pool.Spec.SSH.User,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO Remember last host key. Put in status?
 	}
-	sshConn, channels, requests, err := ssh.NewClientConn(conn, pool.Spec.SSH.Address.String(), &config)
+	logger.Info("connecting via SSH", "address", sshAddress)
+	sshConn, channels, requests, err := ssh.NewClientConn(conn, sshAddress.String(), &config)
 	if err != nil {
-		return reconcile.Result{}, err
+		return "", err
 	}
 	defer sshConn.Close()
 	sshClient := ssh.NewClient(sshConn, channels, requests)
 	session, err := sshClient.NewSession()
 	if err != nil {
-		return reconcile.Result{}, err
+		return "", err
 	}
 	defer session.Close()
 	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
 	zpoolStatus, err := session.CombinedOutput(command)
 	if err != nil {
 		zpoolStatusStr := strings.TrimSpace(string(zpoolStatus))
-		logger.Error(err, "command failed", "output", zpoolStatusStr)
-		pool.Status.State = "Error"
-		pool.Status.Reason = fmt.Sprintf(`failed to run '%s': %s`, command, zpoolStatusStr)
-		return reconcile.Result{}, r.client.Update(ctx, &pool)
+		return "", errors.Errorf(`failed to run '%s': %s`, command, zpoolStatusStr)
 	}
-	stateField := stateFieldFromZpoolStatus(zpoolStatus)
-	logger.Info("pool connection was successful", "state", stateField)
-	pool.Status.State = stateFromStateField(stateField)
-
-	if err := r.client.Update(ctx, &pool); err != nil {
-		return reconcile.Result{}, err
-	}
-	return reconcile.Result{}, nil
+	return stateFieldFromZpoolStatus(zpoolStatus), nil
 }
 
 func arbitraryUnusedIP(usedIP netip.Addr) netip.Addr {
