@@ -19,6 +19,7 @@ func NewLogHandler(tb testing.TB) *slog.TextHandler {
 	moduleDirPrefix := filepath.Join(currentFile(tb), "..", "..", "..") + string(filepath.Separator)
 	return slog.NewTextHandler(writer, &slog.HandlerOptions{
 		AddSource: true,
+		Level:     slog.LevelDebug,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if len(groups) > 0 {
 				return a
@@ -32,6 +33,7 @@ func NewLogHandler(tb testing.TB) *slog.TextHandler {
 					if !strings.HasPrefix(source.File, moduleDirPrefix) {
 						return slog.Attr{}
 					}
+					a.Key = "s"
 					source.File = strings.TrimPrefix(source.File, moduleDirPrefix)
 				}
 				return a
