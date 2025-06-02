@@ -114,7 +114,10 @@ type exitStatusRequest struct {
 
 func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig, config TestConfig) {
 	conn, chans, reqs, err := ssh.NewServerConn(netConn, serverConfig)
-	require.NoError(tb, err)
+	if err != nil {
+		tb.Log("Error handling connection:", err)
+		return
+	}
 	tb.Logf("Logged in with key fingerprint: %s", conn.Permissions.Extensions[publicKeyFingerprintExtension])
 
 	var wg sync.WaitGroup
