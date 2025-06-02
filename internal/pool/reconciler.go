@@ -69,52 +69,9 @@ func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, re
 		return "", errors.New("ssh is required")
 	}
 
-	sshAddress := pool.Spec.SSH.Address
-	var conn net.Conn
-	if wireGuardSpec := pool.Spec.WireGuard; wireGuardSpec != nil {
-		// TODO report status on error
-		peerPublicKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PeerPublicKey)
-		if err != nil {
-			return "", errors.WithMessage(err, "wireguard peer public key")
-		}
-		privateKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PrivateKey)
-		if err != nil {
-			return "", errors.WithMessage(err, "wireguard private key")
-		}
-		var presharedKey []byte
-		if wireGuardSpec.PresharedKey != nil {
-			presharedKey, err = r.getSecretKey(ctx, pool.Namespace, *wireGuardSpec.PresharedKey)
-			if err != nil {
-				return "", errors.WithMessage(err, "wireguard preshared key")
-			}
-		}
-
-		localAddr := arbitraryUnusedIP(wireGuardSpec.PeerAddress.Addr())
-		wireGuardNet, err := wireguard.Connect(ctx, localAddr, wireguard.Config{
-			DNSAddresses:  wireGuardSpec.DNSAddresses,
-			LogHandler:    logr.ToSlogHandler(logger),
-			PeerAddress:   &wireGuardSpec.PeerAddress,
-			PeerPublicKey: peerPublicKey,
-			PresharedKey:  presharedKey,
-			PrivateKey:    privateKey,
-		})
-		if err != nil {
-			return "", err
-		}
-		logger.Info("Dialed WireGuard peer", "peer", wireGuardSpec.PeerAddress, "local ip", localAddr)
-		conn, err = wireGuardNet.DialContextTCPAddrPort(ctx, sshAddress)
-		if err != nil {
-			return "", errors.WithMessagef(err, "failed to dial SSH server %q over WireGuard", sshAddress)
-		}
-		logger.Info("Dialed SSH server over WireGuard", "address", sshAddress)
-	} else {
-		var dialer net.Dialer
-		var err error
-		conn, err = dialer.DialContext(ctx, "tcp", sshAddress.String())
-		if err != nil {
-			return "", errors.WithMessagef(err, "failed to dial SSH server %q directly", sshAddress)
-		}
-		logger.Info("Dialed SSH server directly", "address", sshAddress)
+	conn, err := r.dialSSHConnection(ctx, pool)
+	if err != nil {
+		return "", err
 	}
 	defer conn.Close()
 
@@ -131,6 +88,7 @@ func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, re
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO Remember last host key. Put in status?
 	}
+	sshAddress := pool.Spec.SSH.Address
 	logger.Info("connecting via SSH", "address", sshAddress)
 	sshConn, channels, requests, err := ssh.NewClientConn(conn, sshAddress.String(), &config)
 	if err != nil {
@@ -232,4 +190,59 @@ func stateFromStateField(state string) string {
 		// TODO handle all known zpool states
 		return "Unknown"
 	}
+}
+
+func (r *Reconciler) dialSSHConnection(ctx context.Context, pool Pool) (net.Conn, error) {
+	logger := log.FromContext(ctx)
+	sshAddress := pool.Spec.SSH.Address
+	const dialTimeout = 2 * time.Second
+	sshDialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+
+	wireGuardSpec := pool.Spec.WireGuard
+	if wireGuardSpec == nil {
+		var dialer net.Dialer
+		conn, err := dialer.DialContext(sshDialCtx, "tcp", sshAddress.String())
+		if err != nil {
+			return nil, errors.WithMessagef(err, "dial SSH server %q directly", sshAddress)
+		}
+		logger.Info("Dialed SSH server directly", "address", sshAddress)
+		return conn, nil
+	}
+
+	peerPublicKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PeerPublicKey)
+	if err != nil {
+		return nil, errors.WithMessage(err, "wireguard peer public key")
+	}
+	privateKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PrivateKey)
+	if err != nil {
+		return nil, errors.WithMessage(err, "wireguard private key")
+	}
+	var presharedKey []byte
+	if wireGuardSpec.PresharedKey != nil {
+		presharedKey, err = r.getSecretKey(ctx, pool.Namespace, *wireGuardSpec.PresharedKey)
+		if err != nil {
+			return nil, errors.WithMessage(err, "wireguard preshared key")
+		}
+	}
+
+	localAddr := arbitraryUnusedIP(wireGuardSpec.PeerAddress.Addr())
+	wireGuardNet, err := wireguard.Connect(ctx, localAddr, wireguard.Config{
+		DNSAddresses:  wireGuardSpec.DNSAddresses,
+		LogHandler:    logr.ToSlogHandler(logger),
+		PeerAddress:   &wireGuardSpec.PeerAddress,
+		PeerPublicKey: peerPublicKey,
+		PresharedKey:  presharedKey,
+		PrivateKey:    privateKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Connected to WireGuard peer", "peer", wireGuardSpec.PeerAddress, "local ip", localAddr)
+	conn, err := wireGuardNet.DialContextTCPAddrPort(sshDialCtx, sshAddress)
+	if err != nil {
+		return nil, errors.WithMessagef(err, "dial SSH server %q over WireGuard", sshAddress)
+	}
+	logger.Info("Dialed SSH server over WireGuard", "address", sshAddress)
+	return conn, nil
 }
