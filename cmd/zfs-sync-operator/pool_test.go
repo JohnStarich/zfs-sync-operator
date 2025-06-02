@@ -17,6 +17,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	maxWaitForPool = zfspool.MaxReconcileWait * 220 / 100
+	tickForPool    = max(10*time.Millisecond, maxWaitForPool/10)
+)
+
 func TestPoolWithOnlySSH(t *testing.T) {
 	t.Parallel()
 	run := RunTest(t)
@@ -83,7 +88,7 @@ config:
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Online", pool.Status.State)
 		assert.Equal(collect, "", pool.Status.Reason)
-	}, 1*time.Second, 10*time.Millisecond)
+	}, maxWaitForPool, tickForPool)
 
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
 		ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
@@ -108,34 +113,19 @@ config:
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Error", pool.Status.State)
 		assert.Equal(collect, fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
-	}, 1*time.Second, 10*time.Millisecond)
+	}, maxWaitForPool, tickForPool)
 }
 
 func TestPoolWithSSHOverWireGuard(t *testing.T) {
 	t.Parallel()
 	run := RunTest(t)
-	presharedKey, err := wgtypes.GenerateKey()
-	require.NoError(t, err)
-
-	serverPrivateKey, err := wgtypes.GeneratePrivateKey()
-	require.NoError(t, err)
-	serverPublicKey := serverPrivateKey.PublicKey()
-
-	clientPrivateKey, err := wgtypes.GeneratePrivateKey()
-	require.NoError(t, err)
-	clientPublicKey := clientPrivateKey.PublicKey()
-
-	remoteWireGuardInternalAddr := netip.MustParseAddr("10.3.0.2")
-	wireguardNet, wireguardAddr := wireguard.StartTestServer(t, remoteWireGuardInternalAddr, presharedKey, serverPrivateKey, clientPublicKey)
-	sshListener, err := wireguardNet.ListenTCPAddrPort(netip.AddrPortFrom(remoteWireGuardInternalAddr, 0))
-	require.NoError(t, err)
-
-	const foundPool = "mypool"
-	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{
-		Listener: sshListener,
-		ExecResults: map[string]ssh.TestExecResult{
-			fmt.Sprintf(`/usr/sbin/zpool status %s`, foundPool): {
-				Stdout: fmt.Appendf(nil, `
+	const (
+		foundPool    = "mypool"
+		notFoundPool = "mynotfoundpool"
+	)
+	servers := startSSHOverWireGuard(t, map[string]ssh.TestExecResult{
+		fmt.Sprintf(`/usr/sbin/zpool status %s`, foundPool): {
+			Stdout: fmt.Appendf(nil, `
   pool: %[1]s
  state: ONLINE
 config:
@@ -150,8 +140,11 @@ config:
 
  errors: No known data errors
 `, foundPool),
-				ExitCode: 0,
-			},
+			ExitCode: 0,
+		},
+		fmt.Sprintf(`/usr/sbin/zpool status %s`, notFoundPool): {
+			Stdout:   fmt.Appendf(nil, "cannot open '%[1]s': no such pool\n", notFoundPool),
+			ExitCode: 1,
 		},
 	})
 	const (
@@ -161,7 +154,7 @@ config:
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: sshSecretName, Namespace: run.Namespace},
 		StringData: map[string]string{
-			sshPrivateKeySelector: sshPrivateKey,
+			sshPrivateKeySelector: servers.SSH.PrivateKey,
 		},
 	}))
 	const (
@@ -173,18 +166,17 @@ config:
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: wireguardSecretName, Namespace: run.Namespace},
 		Data: map[string][]byte{
-			wireguardSecretKeyPeerPublicKey: serverPublicKey[:],
-			wireguardSecretKeyPresharedKey:  presharedKey[:],
-			wireguardSecretKeyPrivateKey:    clientPrivateKey[:],
+			wireguardSecretKeyPeerPublicKey: servers.WireGuard.ServerPublicKey,
+			wireguardSecretKeyPresharedKey:  servers.WireGuard.PresharedKey,
+			wireguardSecretKeyPrivateKey:    servers.WireGuard.ClientPrivateKey,
 		},
 	}))
-	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
-		ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
-		Spec: zfspool.Spec{
-			Name: foundPool,
+	specWithName := func(name string) zfspool.Spec {
+		return zfspool.Spec{
+			Name: name,
 			SSH: &zfspool.SSHSpec{
-				User:    sshUser,
-				Address: sshAddr,
+				User:    servers.SSH.User,
+				Address: servers.SSH.Address,
 				PrivateKey: corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: sshSecretName,
@@ -193,7 +185,7 @@ config:
 				},
 			},
 			WireGuard: &zfspool.WireGuardSpec{
-				PeerAddress: wireguardAddr,
+				PeerAddress: servers.WireGuard.PeerAddress,
 				PeerPublicKey: corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
 					Key:                  wireguardSecretKeyPeerPublicKey,
@@ -207,7 +199,12 @@ config:
 					Key:                  wireguardSecretKeyPrivateKey,
 				},
 			},
-		},
+		}
+	}
+
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
+		Spec:       specWithName(foundPool),
 	}))
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		pool := zfspool.Pool{
@@ -216,7 +213,76 @@ config:
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Online", pool.Status.State)
 		assert.Equal(collect, "", pool.Status.Reason)
-	}, zfspool.MaxReconcileWait*120/100, 10*time.Millisecond)
+	}, maxWaitForPool, tickForPool)
 
-	// TODO not found check too
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
+		Spec:       specWithName(notFoundPool),
+	}))
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		pool := zfspool.Pool{
+			ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
+		}
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
+		assert.Equal(collect, "Error", pool.Status.State)
+		assert.Equal(collect, fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
+	}, maxWaitForPool, tickForPool)
+}
+
+type TestSSHOverWireGuard struct {
+	SSH       TestSSH
+	WireGuard TestWireGuard
+}
+
+type TestSSH struct {
+	Address    netip.AddrPort
+	PrivateKey string
+	User       string
+}
+
+type TestWireGuard struct {
+	ClientPrivateKey []byte
+	PeerAddress      netip.AddrPort
+	PresharedKey     []byte
+	ServerPublicKey  []byte // TODO ban wireguard "server" and "client". find a different, more idiomatic way to describe these
+}
+
+func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecResult) TestSSHOverWireGuard {
+	presharedKey, err := wgtypes.GenerateKey()
+	require.NoError(tb, err)
+
+	serverPrivateKey, err := wgtypes.GeneratePrivateKey()
+	require.NoError(tb, err)
+	serverPublicKey := serverPrivateKey.PublicKey()
+
+	clientPrivateKey, err := wgtypes.GeneratePrivateKey()
+	require.NoError(tb, err)
+	clientPublicKey := clientPrivateKey.PublicKey()
+
+	remoteWireGuardInternalAddr := netip.MustParseAddr("10.3.0.2")
+	wireguardNet, wireguardAddr := wireguard.StartTestServer(tb, remoteWireGuardInternalAddr, presharedKey, serverPrivateKey, clientPublicKey)
+	sshListener, err := wireguardNet.ListenTCPAddrPort(netip.AddrPortFrom(remoteWireGuardInternalAddr, 0))
+	require.NoError(tb, err)
+	tb.Cleanup(func() {
+		require.NoError(tb, sshListener.Close())
+	})
+
+	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{
+		Listener:    sshListener,
+		ExecResults: execResults,
+	})
+
+	return TestSSHOverWireGuard{
+		SSH: TestSSH{
+			Address:    sshAddr,
+			PrivateKey: sshPrivateKey,
+			User:       sshUser,
+		},
+		WireGuard: TestWireGuard{
+			ClientPrivateKey: clientPrivateKey[:],
+			PeerAddress:      wireguardAddr,
+			PresharedKey:     presharedKey[:],
+			ServerPublicKey:  serverPublicKey[:],
+		},
+	}
 }
