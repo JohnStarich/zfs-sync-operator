@@ -57,15 +57,16 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 		}
 	}()
 
-	namespace := strings.ToLower(tb.Name())
-	err := TestEnv.Client().Create(ctx, &corev1.Namespace{
+	namespaceObj := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: namespace,
+			GenerateName: strings.ToLower(tb.Name()),
 		},
-	})
+	}
+	err := TestEnv.Client().Create(ctx, namespaceObj)
 	if err != nil {
 		tb.Fatal(err)
 	}
+	namespace := namespaceObj.Name
 
 	level := slog.LevelInfo
 	if testing.Verbose() {
