@@ -3,6 +3,7 @@ package backup
 
 import (
 	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -14,7 +15,7 @@ import (
 func MustAddToScheme(s *runtime.Scheme) {
 	schemeBuilder := &scheme.Builder{
 		GroupVersion: schema.GroupVersion{
-			Group:   "zfs-sync-operator.johnstarich.com",
+			Group:   name.Operator + ".johnstarich.com",
 			Version: "v1alpha1",
 		},
 	}

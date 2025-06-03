@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
@@ -44,13 +45,13 @@ func runWithArgs(ctx context.Context, args []string, out io.Writer) error {
 		return err
 	}
 	if len(flagSet.Args()) > 0 {
-		return errors.New("zfs-sync-operator: this command does not take any arguments")
+		return errors.New(name.Operator + ": this command does not take any arguments")
 	}
 	restConfig, err := clientconfig.GetConfig()
 	if err != nil {
 		return err
 	}
-	const operatorNamespace = "zfs-sync-operator-system"
+	const operatorNamespace = name.Operator + "-system"
 	o, err := New(ctx, restConfig, Config{
 		LogHandler: slog.NewJSONHandler(out, nil),
 		Namespace:  operatorNamespace,
@@ -94,7 +95,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 
 	mgr, err := manager.New(restConfig, manager.Options{
 		LeaderElection:                true,
-		LeaderElectionID:              "zfs-sync-operator.johnstarich.com",
+		LeaderElectionID:              name.Operator + ".johnstarich.com",
 		LeaderElectionNamespace:       c.Namespace,
 		LeaderElectionReleaseOnCancel: true,
 		Logger:                        logger,
