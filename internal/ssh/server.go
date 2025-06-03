@@ -153,7 +153,9 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig,
 					_, err := channel.SendRequest(exitStatusRequestName, false, ssh.Marshal(exitStatus))
 					require.NoError(tb, err)
 				}(req)
-				require.NoError(tb, req.Reply(true, nil))
+				if err := req.Reply(true, nil); err != nil && !errors.Is(err, io.EOF) {
+					require.NoError(tb, err)
+				}
 			}
 			wg.Done()
 		}(requests)
