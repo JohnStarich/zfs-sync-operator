@@ -77,11 +77,11 @@ func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, re
 	err := pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
 		var err error
 		zpoolStatus, err = session.CombinedOutput(command)
-		return err
+		zpoolStatusStr := strings.TrimSpace(string(zpoolStatus))
+		return errors.Wrapf(err, `failed to run '%s': %s`, command, zpoolStatusStr)
 	})
 	if err != nil {
-		zpoolStatusStr := strings.TrimSpace(string(zpoolStatus))
-		return "", errors.Errorf(`failed to run '%s': %s`, command, zpoolStatusStr)
+		return "", err
 	}
 	return stateFieldFromZpoolStatus(zpoolStatus), nil
 }
