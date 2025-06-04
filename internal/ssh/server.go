@@ -49,7 +49,6 @@ func TestServer(tb testing.TB, config TestConfig) (user, privateKey string, addr
 			require.NoError(tb, listener.Close())
 		})
 		config.Listener = listener
-		WaitUntilTCPDialable(tb, listener.Addr().String(), (&net.Dialer{}).DialContext)
 	}
 	tcpAddress, isTCPAddress := config.Listener.Addr().(*net.TCPAddr)
 	require.True(tb, isTCPAddress, "Listener address must have a port")

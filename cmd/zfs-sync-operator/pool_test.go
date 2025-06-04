@@ -271,7 +271,6 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecRes
 		Listener:    sshListener,
 		ExecResults: execResults,
 	})
-	ssh.WaitUntilTCPDialable(tb, sshAddr.String(), wireguardNet.DialContext)
 
 	return TestSSHOverWireGuard{
 		SSH: TestSSH{
