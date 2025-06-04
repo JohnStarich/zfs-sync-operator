@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"strings"
+	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
@@ -64,6 +65,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
+	const maxSessionWait = 10 * time.Second
+	ctx, cancel := context.WithTimeout(ctx, maxSessionWait)
+	defer cancel()
+
 	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
 	var zpoolStatus []byte
 	err := pool.WithSession(ctx, r.client, func(session *ssh.Session) error {

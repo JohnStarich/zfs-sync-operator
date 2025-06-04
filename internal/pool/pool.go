@@ -5,7 +5,6 @@ import (
 	"context"
 	"net"
 	"net/netip"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
@@ -102,9 +101,6 @@ func (l *PoolList) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy
 
 // WithSession starts an SSH session (optionally over WireGuard) using p's Spec, runs do with the session, then tears everything down
 func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func(*ssh.Session) error) error {
-	const maxSessionWait = 1 * time.Minute
-	ctx, cancel := context.WithTimeout(ctx, maxSessionWait)
-	defer cancel()
 	logger := log.FromContext(ctx)
 
 	if p.Spec == nil || p.Spec.SSH == nil {
