@@ -13,12 +13,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
+const (
+	group      = name.Operator + ".johnstarich.com"
+	apiVersion = "v1alpha1"
+)
+
 // MustAddToScheme adds the Pool scheme to s
 func MustAddToScheme(s *runtime.Scheme) {
 	schemeBuilder := &scheme.Builder{
 		GroupVersion: schema.GroupVersion{
-			Group:   name.Operator + ".johnstarich.com",
-			Version: "v1alpha1",
+			Group:   group,
+			Version: apiVersion,
 		},
 	}
 	schemeBuilder.Register(&Pool{}, &PoolList{})
@@ -28,13 +33,20 @@ func MustAddToScheme(s *runtime.Scheme) {
 	}
 }
 
+func typeMeta() metav1.TypeMeta {
+	return metav1.TypeMeta{
+		Kind:       "Pool",
+		APIVersion: group + "/" + apiVersion,
+	}
+}
+
 // Pool represents a ZFS pool and its connection details, including WireGuard and SSH
 type Pool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   Spec   `json:"spec,omitempty"`
-	Status Status `json:"status,omitempty"`
+	Spec   *Spec   `json:"spec,omitempty"`
+	Status *Status `json:"status,omitempty"`
 }
 
 // DeepCopyObject implements [runtime.Object]
@@ -63,8 +75,8 @@ type WireGuardSpec struct {
 
 // Status holds status information for a [Pool]
 type Status struct {
-	State  string `json:"state,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	State  string `json:"state"`
+	Reason string `json:"reason"`
 }
 
 // PoolList is a list of [Pool]. Required to perform a Watch.

@@ -67,7 +67,7 @@ config:
 	}))
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
 		ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
-		Spec: zfspool.Spec{
+		Spec: &zfspool.Spec{
 			Name: foundPool,
 			SSH: &zfspool.SSHSpec{
 				User:    sshUser,
@@ -86,13 +86,15 @@ config:
 			ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-		assert.Equal(collect, "Online", pool.Status.State)
-		assert.Equal(collect, "", pool.Status.Reason)
+		assert.Equal(collect, &zfspool.Status{
+			State:  "Online",
+			Reason: "",
+		}, pool.Status)
 	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
 		ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
-		Spec: zfspool.Spec{
+		Spec: &zfspool.Spec{
 			Name: notFoundPool,
 			SSH: &zfspool.SSHSpec{
 				User:    sshUser,
@@ -111,8 +113,10 @@ config:
 			ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-		assert.Equal(collect, "Error", pool.Status.State)
-		assert.Equal(collect, fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
+		assert.Equal(collect, &zfspool.Status{
+			State:  "Error",
+			Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool),
+		}, pool.Status)
 	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 }
 
@@ -171,8 +175,8 @@ config:
 			wireguardSecretKeyPrivateKey:    servers.WireGuard.ClientPrivateKey,
 		},
 	}))
-	specWithName := func(name string) zfspool.Spec {
-		return zfspool.Spec{
+	specWithName := func(name string) *zfspool.Spec {
+		return &zfspool.Spec{
 			Name: name,
 			SSH: &zfspool.SSHSpec{
 				User:    servers.SSH.User,
@@ -211,8 +215,10 @@ config:
 			ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-		assert.Equal(collect, "Online", pool.Status.State)
-		assert.Equal(collect, "", pool.Status.Reason)
+		assert.Equal(collect, &zfspool.Status{
+			State:  "Online",
+			Reason: "",
+		}, pool.Status)
 	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
@@ -224,8 +230,10 @@ config:
 			ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-		assert.Equal(collect, "Error", pool.Status.State)
-		assert.Equal(collect, fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
+		assert.Equal(collect, &zfspool.Status{
+			State:  "Error",
+			Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool),
+		}, pool.Status)
 	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 }
 

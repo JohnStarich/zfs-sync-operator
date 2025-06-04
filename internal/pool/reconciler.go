@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/go-logr/logr"
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
@@ -40,21 +41,33 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 	logger.Info("got pool", "status", pool.Status, "pool", pool.Spec)
-	if pool.Status.State == "Online" { // TODO verify nothing has changed
+	if pool.Status != nil && pool.Status.State == "Online" { // TODO verify nothing has changed
 		// TODO can we ignore status field changes? only ack spec or secret updates?
 		return reconcile.Result{}, nil
 	}
-	state, err := r.reconcile(ctx, pool)
-	if err == nil {
-		logger.Info("pool detected successfully")
-		pool.Status.State = stateFromStateField(state)
-		pool.Status.Reason = ""
-	} else {
-		logger.Error(err, "reconcile failed")
-		pool.Status.State = "Error"
-		pool.Status.Reason = err.Error()
+
+	state, reconcileErr := r.reconcile(ctx, pool)
+
+	poolStatusPatch := Pool{
+		TypeMeta:   typeMeta(),
+		ObjectMeta: metav1.ObjectMeta{Name: request.Name, Namespace: request.Namespace},
 	}
-	return reconcile.Result{}, r.client.Update(ctx, &pool)
+	if reconcileErr == nil {
+		logger.Info("pool detected successfully", "state", state)
+		poolStatusPatch.Status = &Status{
+			State: stateFromStateField(state),
+		}
+	} else {
+		logger.Error(reconcileErr, "reconcile failed")
+		poolStatusPatch.Status = &Status{
+			State:  "Error",
+			Reason: reconcileErr.Error(),
+		}
+	}
+	statusErr := r.client.Patch(ctx, &poolStatusPatch, client.Apply, &client.PatchOptions{
+		FieldManager: name.Operator,
+	})
+	return reconcile.Result{}, errors.Wrap(statusErr, "failed to update status")
 }
 
 const maxReconcileWait = 1 * time.Minute
@@ -65,7 +78,7 @@ func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, re
 	defer cancel()
 	logger := log.FromContext(ctx)
 
-	if pool.Spec.SSH == nil {
+	if pool.Spec == nil || pool.Spec.SSH == nil {
 		return "", errors.New("ssh is required")
 	}
 
@@ -192,57 +205,77 @@ func stateFromStateField(state string) string {
 	}
 }
 
+type contextDialer interface {
+	DialContext(ctx context.Context, network, address string) (net.Conn, error)
+}
+
 func (r *Reconciler) dialSSHConnection(ctx context.Context, pool Pool) (net.Conn, error) {
 	logger := log.FromContext(ctx)
 	sshAddress := pool.Spec.SSH.Address
-	const dialTimeout = 2 * time.Second
-	sshDialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
 
-	wireGuardSpec := pool.Spec.WireGuard
-	if wireGuardSpec == nil {
-		var dialer net.Dialer
-		conn, err := dialer.DialContext(sshDialCtx, "tcp", sshAddress.String())
+	var ipNet contextDialer = &net.Dialer{}
+	if wireGuardSpec := pool.Spec.WireGuard; wireGuardSpec == nil {
+		logger.Info("Using direct SSH connection")
+	} else {
+		logger.Info("Using SSH over WireGuard connection")
+		peerPublicKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PeerPublicKey)
 		if err != nil {
-			return nil, errors.WithMessagef(err, "dial SSH server %q directly", sshAddress)
+			return nil, errors.WithMessage(err, "wireguard peer public key")
 		}
-		logger.Info("Dialed SSH server directly", "address", sshAddress)
-		return conn, nil
-	}
-
-	peerPublicKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PeerPublicKey)
-	if err != nil {
-		return nil, errors.WithMessage(err, "wireguard peer public key")
-	}
-	privateKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PrivateKey)
-	if err != nil {
-		return nil, errors.WithMessage(err, "wireguard private key")
-	}
-	var presharedKey []byte
-	if wireGuardSpec.PresharedKey != nil {
-		presharedKey, err = r.getSecretKey(ctx, pool.Namespace, *wireGuardSpec.PresharedKey)
+		privateKey, err := r.getSecretKey(ctx, pool.Namespace, wireGuardSpec.PrivateKey)
 		if err != nil {
-			return nil, errors.WithMessage(err, "wireguard preshared key")
+			return nil, errors.WithMessage(err, "wireguard private key")
 		}
+		var presharedKey []byte
+		if wireGuardSpec.PresharedKey != nil {
+			presharedKey, err = r.getSecretKey(ctx, pool.Namespace, *wireGuardSpec.PresharedKey)
+			if err != nil {
+				return nil, errors.WithMessage(err, "wireguard preshared key")
+			}
+		}
+
+		localAddr := arbitraryUnusedIP(wireGuardSpec.PeerAddress.Addr())
+		wireGuardNet, err := wireguard.Connect(ctx, localAddr, wireguard.Config{
+			DNSAddresses:  wireGuardSpec.DNSAddresses,
+			LogHandler:    logr.ToSlogHandler(logger),
+			PeerAddress:   &wireGuardSpec.PeerAddress,
+			PeerPublicKey: peerPublicKey,
+			PresharedKey:  presharedKey,
+			PrivateKey:    privateKey,
+		})
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("Connected to WireGuard peer", "peer", wireGuardSpec.PeerAddress, "local ip", localAddr)
+		ipNet = wireGuardNet
 	}
 
-	localAddr := arbitraryUnusedIP(wireGuardSpec.PeerAddress.Addr())
-	wireGuardNet, err := wireguard.Connect(ctx, localAddr, wireguard.Config{
-		DNSAddresses:  wireGuardSpec.DNSAddresses,
-		LogHandler:    logr.ToSlogHandler(logger),
-		PeerAddress:   &wireGuardSpec.PeerAddress,
-		PeerPublicKey: peerPublicKey,
-		PresharedKey:  presharedKey,
-		PrivateKey:    privateKey,
+	const dialRetries = 10
+	dialTimeout := 500 * time.Millisecond
+	return retryWithTimeout(ctx, dialTimeout, dialRetries, func(ctx context.Context) (net.Conn, error) {
+		conn, err := ipNet.DialContext(ctx, "tcp", sshAddress.String())
+		return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
 	})
-	if err != nil {
-		return nil, err
+}
+
+func retryWithTimeout[Value any](ctx context.Context, timeout time.Duration, retries uint, do func(context.Context) (Value, error)) (value Value, doErr error) {
+	logger := log.FromContext(ctx)
+	if retries == 0 {
+		retries = 1
 	}
-	logger.Info("Connected to WireGuard peer", "peer", wireGuardSpec.PeerAddress, "local ip", localAddr)
-	conn, err := wireGuardNet.DialContextTCPAddrPort(sshDialCtx, sshAddress)
-	if err != nil {
-		return nil, errors.WithMessagef(err, "dial SSH server %q over WireGuard", sshAddress)
+	for attempt := range retries {
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		value, doErr = do(timeoutCtx)
+		if doErr == nil {
+			return value, nil
+		}
+		logger.Error(doErr, "failed retry attempt", "waited", timeout, "attempt", attempt)
+		select {
+		case <-ctx.Done():
+			return value, doErr
+		default:
+		}
 	}
-	logger.Info("Dialed SSH server over WireGuard", "address", sshAddress)
-	return conn, nil
+	return value, doErr
 }
