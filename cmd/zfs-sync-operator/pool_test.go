@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxWaitForPool = testMaxReconcileWait * 220 / 100
+	maxWaitForPool = zfspool.MaxReconcileWait * 220 / 100
 	tickForPool    = max(10*time.Millisecond, maxWaitForPool/10)
 )
 
