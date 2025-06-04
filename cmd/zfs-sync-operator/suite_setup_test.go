@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
@@ -41,6 +42,8 @@ func TestMain(m *testing.M) {
 type TestRunConfig struct {
 	Namespace string
 }
+
+const testMaxReconcileWait = 1 * time.Second
 
 func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 	tb.Helper()
@@ -75,6 +78,7 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 	operator, err := New(ctx, TestEnv.RESTConfig(), Config{
 		Namespace:         namespace,
 		LogHandler:        testlog.NewLogHandler(tb, level),
+		MaxReconcileWait:  testMaxReconcileWait,
 		MetricsPort:       "0",
 		idempotentMetrics: true,
 	})

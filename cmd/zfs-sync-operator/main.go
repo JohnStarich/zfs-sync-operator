@@ -83,6 +83,7 @@ type Operator struct {
 
 type Config struct {
 	LogHandler        slog.Handler
+	MaxReconcileWait  time.Duration
 	MetricsPort       string
 	Namespace         string
 	idempotentMetrics bool // disables safety checks for double metrics registrations
@@ -92,6 +93,9 @@ type Config struct {
 func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, error) {
 	if c.MetricsPort == "" {
 		c.MetricsPort = "8080"
+	}
+	if c.MaxReconcileWait == 0 {
+		c.MaxReconcileWait = 10 * time.Second
 	}
 	logger := logr.FromSlogHandler(c.LogHandler)
 
@@ -129,7 +133,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	}
 	{ // Pool
 		ctrl, err := controller.New("pool", mgr, controller.Options{
-			Reconciler: pool.NewReconciler(mgr.GetClient()),
+			Reconciler: pool.NewReconciler(mgr.GetClient(), c.MaxReconcileWait),
 		})
 		if err != nil {
 			return nil, err

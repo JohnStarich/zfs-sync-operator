@@ -23,12 +23,13 @@ import (
 
 // Reconciler reconciles Pool resources to validate their Pools and associated connections
 type Reconciler struct {
-	client client.Client
+	client           client.Client
+	maxReconcileWait time.Duration
 }
 
 // NewReconciler returns a new pool reconciler
-func NewReconciler(client client.Client) *Reconciler {
-	return &Reconciler{client: client}
+func NewReconciler(client client.Client, maxReconcileWait time.Duration) *Reconciler {
+	return &Reconciler{client: client, maxReconcileWait: maxReconcileWait}
 }
 
 // Reconcile implements [reconcile.Reconciler]
@@ -57,11 +58,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return reconcile.Result{}, r.client.Update(ctx, &pool)
 }
 
-const MaxReconcileWait = 10 * time.Second
-
 func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
 	defer func() { returnedErr = errors.WithStack(returnedErr) }()
-	ctx, cancel := context.WithTimeout(ctx, MaxReconcileWait)
+	ctx, cancel := context.WithTimeout(ctx, r.maxReconcileWait)
 	defer cancel()
 	logger := log.FromContext(ctx)
 
