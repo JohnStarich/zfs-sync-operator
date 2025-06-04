@@ -42,6 +42,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 	state, reconcileErr := r.reconcile(ctx, pool)
 
+	result := reconcile.Result{}
 	poolStatusPatch := Pool{
 		TypeMeta:   typeMeta(),
 		ObjectMeta: metav1.ObjectMeta{Name: request.Name, Namespace: request.Namespace},
@@ -53,6 +54,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		}
 	} else {
 		logger.Error(reconcileErr, "reconcile failed")
+		const retryErrorWait = 1 * time.Minute
+		result.RequeueAfter = retryErrorWait
 		poolStatusPatch.Status = &Status{
 			State:  "Error",
 			Reason: reconcileErr.Error(),
@@ -61,7 +64,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	statusErr := r.client.Patch(ctx, &poolStatusPatch, ctrlclient.Apply, &ctrlclient.PatchOptions{
 		FieldManager: name.Operator,
 	})
-	return reconcile.Result{}, errors.Wrap(statusErr, "failed to update status")
+	return result, errors.Wrap(statusErr, "failed to update status")
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
