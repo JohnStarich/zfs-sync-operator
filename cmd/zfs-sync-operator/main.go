@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"

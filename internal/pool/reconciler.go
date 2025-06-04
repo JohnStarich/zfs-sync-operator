@@ -57,11 +57,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return reconcile.Result{}, r.client.Update(ctx, &pool)
 }
 
-const MaxReconcileWait = 10 * time.Second
+const maxReconcileWait = 1 * time.Minute
 
 func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
 	defer func() { returnedErr = errors.WithStack(returnedErr) }()
-	ctx, cancel := context.WithTimeout(ctx, MaxReconcileWait)
+	ctx, cancel := context.WithTimeout(ctx, maxReconcileWait)
 	defer cancel()
 	logger := log.FromContext(ctx)
 
