@@ -11,12 +11,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
-	"k8s.io/apimachinery/pkg/runtime"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -62,8 +64,8 @@ func runWithArgs(ctx context.Context, args []string, out io.Writer) error {
 	return o.Wait()
 }
 
-func mustNewScheme() *runtime.Scheme {
-	scheme := runtime.NewScheme()
+func mustNewScheme() *apiruntime.Scheme {
+	scheme := apiruntime.NewScheme()
 	err := clientsetscheme.AddToScheme(scheme)
 	if err != nil {
 		panic(err)
@@ -93,6 +95,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	}
 	logger := logr.FromSlogHandler(c.LogHandler)
 
+	const reconcilesPerCPU = 2 // Most of the controllers are network-bound, allow a little shared CPU time
 	mgr, err := manager.New(restConfig, manager.Options{
 		LeaderElection:                true,
 		LeaderElectionID:              name.Operator + ".johnstarich.com",
@@ -102,7 +105,8 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 		BaseContext:                   func() context.Context { return ctx },
 		Scheme:                        mustNewScheme(),
 		Controller: config.Controller{
-			SkipNameValidation: toPointer(c.idempotentMetrics),
+			SkipNameValidation:      toPointer(c.idempotentMetrics),
+			MaxConcurrentReconciles: runtime.NumCPU() * reconcilesPerCPU,
 		},
 		Metrics: server.Options{
 			BindAddress: net.JoinHostPort("", c.MetricsPort),
