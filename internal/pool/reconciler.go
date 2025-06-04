@@ -249,32 +249,6 @@ func (r *Reconciler) dialSSHConnection(ctx context.Context, pool Pool) (net.Conn
 		ipNet = wireGuardNet
 	}
 
-	const dialRetries = 10
-	dialTimeout := 500 * time.Millisecond
-	return retryWithTimeout(ctx, dialTimeout, dialRetries, func(ctx context.Context) (net.Conn, error) {
-		conn, err := ipNet.DialContext(ctx, "tcp", sshAddress.String())
-		return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
-	})
-}
-
-func retryWithTimeout[Value any](ctx context.Context, timeout time.Duration, retries uint, do func(context.Context) (Value, error)) (value Value, doErr error) {
-	logger := log.FromContext(ctx)
-	if retries == 0 {
-		retries = 1
-	}
-	for attempt := range retries {
-		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		value, doErr = do(timeoutCtx)
-		if doErr == nil {
-			return value, nil
-		}
-		logger.Error(doErr, "failed retry attempt", "waited", timeout, "attempt", attempt)
-		select {
-		case <-ctx.Done():
-			return value, doErr
-		default:
-		}
-	}
-	return value, doErr
+	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress.String())
+	return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
 }
