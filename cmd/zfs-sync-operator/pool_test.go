@@ -81,14 +81,14 @@ config:
 			},
 		},
 	}))
-	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+	require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 		pool := zfspool.Pool{
 			ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Online", pool.Status.State)
 		assert.Equal(collect, "", pool.Status.Reason)
-	}, maxWaitForPool, tickForPool)
+	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
 		ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
@@ -106,14 +106,14 @@ config:
 			},
 		},
 	}))
-	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+	require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 		pool := zfspool.Pool{
 			ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Error", pool.Status.State)
 		assert.Equal(collect, fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
-	}, maxWaitForPool, tickForPool)
+	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 }
 
 func TestPoolWithSSHOverWireGuard(t *testing.T) {
@@ -206,27 +206,27 @@ config:
 		ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
 		Spec:       specWithName(foundPool),
 	}))
-	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+	require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 		pool := zfspool.Pool{
 			ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Online", pool.Status.State)
 		assert.Equal(collect, "", pool.Status.Reason)
-	}, maxWaitForPool, tickForPool)
+	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 
 	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
 		ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
 		Spec:       specWithName(notFoundPool),
 	}))
-	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+	require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 		pool := zfspool.Pool{
 			ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
 		}
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, "Error", pool.Status.State)
 		assert.Equal(collect, fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool), pool.Status.Reason)
-	}, maxWaitForPool, tickForPool)
+	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 }
 
 type TestSSHOverWireGuard struct {
