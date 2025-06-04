@@ -59,7 +59,7 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 
 	namespaceObj := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: strings.ToLower(tb.Name()),
+			GenerateName: namespaceName(tb),
 		},
 	}
 	err := TestEnv.Client().Create(ctx, namespaceObj)
@@ -73,9 +73,9 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 		level = slog.LevelDebug
 	}
 	operator, err := New(ctx, TestEnv.RESTConfig(), Config{
-		Namespace:         namespace,
 		LogHandler:        testlog.NewLogHandler(tb, level),
 		MetricsPort:       "0",
+		Namespace:         namespace,
 		idempotentMetrics: true,
 	})
 	if err != nil {
@@ -95,4 +95,11 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 	return TestRunConfig{
 		Namespace: namespace,
 	}
+}
+
+func namespaceName(tb testing.TB) string {
+	name := tb.Name()
+	name = strings.ToLower(name)
+	name = strings.ReplaceAll(name, "/", "-")
+	return name
 }
