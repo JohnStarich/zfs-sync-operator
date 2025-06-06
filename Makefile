@@ -15,3 +15,8 @@ lint: lint-deps
 .PHONY: test
 test:
 	go test -race ./...
+
+.PHONY: run
+run:
+	kubectl apply -f ./config/crd
+	go run ./cmd/zfs-sync-operator
