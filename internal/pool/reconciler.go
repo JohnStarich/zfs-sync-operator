@@ -68,7 +68,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
-	const maxSessionWait = 10 * time.Second
+	const maxSessionWait = 8 * time.Second
 	ctx, cancel := context.WithTimeout(ctx, maxSessionWait)
 	defer cancel()
 

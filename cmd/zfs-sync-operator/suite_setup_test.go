@@ -102,5 +102,6 @@ func namespaceName(tb testing.TB) string {
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, "/", "-")
 	name = strings.ReplaceAll(name, "#", "-")
+	name = strings.ReplaceAll(name, "_", "-")
 	return name
 }

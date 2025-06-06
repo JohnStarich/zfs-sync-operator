@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	"github.com/stretchr/testify/assert"
@@ -38,12 +39,29 @@ func TestConnectToHTTPServer(t *testing.T) {
 	}
 
 	const clientVPNAddr = "192.168.4.28"
-	httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, clientPrivateKey, serverPublicKey, serverAddr)
-	resp, err := httpClient.Get(serverHTTPURL.String())
-	require.NoError(t, err)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	assert.Equal(t, someMessage, string(body))
+	t.Run("happy path", func(t *testing.T) {
+		t.Parallel()
+		httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, clientPrivateKey, serverPublicKey, serverAddr)
+		resp, err := httpClient.Get(serverHTTPURL.String())
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, someMessage, string(body))
+	})
+
+	t.Run("busted wireguard client key breaks connection", func(t *testing.T) {
+		t.Parallel()
+		// Then verify an almost identical client with a busted key fails to connect.
+		// This ensures we didn't just happen to bind to all interfaces and communicate outside WireGuard.
+		bustedPrivateKey := clientPrivateKey[:]
+		bustedPrivateKey[2] = 'f'
+		bustedPrivateKey[3] = 'o'
+		bustedPrivateKey[4] = 'o'
+		bustedPrivateWireGuardKey := wgtypes.Key(bustedPrivateKey)
+		httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, bustedPrivateWireGuardKey, serverPublicKey, serverAddr)
+		_, err := httpClient.Get(serverHTTPURL.String())
+		require.EqualError(t, err, `Get "http://192.168.4.29": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`)
+	})
 }
 
 func startHTTPServer(t *testing.T, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key, message string) netip.AddrPort {
@@ -80,5 +98,6 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 		Transport: &http.Transport{
 			DialContext: clientNet.DialContext,
 		},
+		Timeout: 5 * time.Second, // arbitrarily large timeout for a test
 	}
 }
