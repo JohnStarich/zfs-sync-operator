@@ -115,7 +115,7 @@ config:
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, &zfspool.Status{
 			State:  "Error",
-			Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool),
+			Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, notFoundPool),
 		}, pool.Status)
 	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 }
@@ -232,7 +232,7 @@ config:
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 		assert.Equal(collect, &zfspool.Status{
 			State:  "Error",
-			Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool`, notFoundPool),
+			Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, notFoundPool),
 		}, pool.Status)
 	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 }
