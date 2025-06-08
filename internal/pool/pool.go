@@ -71,7 +71,7 @@ type Spec struct {
 
 // SSHSpec defines the SSH connection details for a [Pool]
 type SSHSpec struct {
-	Address    netip.AddrPort           `json:"address"`
+	Address    string                   `json:"address"`
 	HostKey    *[]byte                  `json:"hostKey,omitempty"` // The SSH host's public key. Used for verification after the pool's first connection.
 	PrivateKey corev1.SecretKeySelector `json:"privateKey"`
 	User       string                   `json:"user"`
@@ -82,7 +82,7 @@ type WireGuardSpec struct {
 	DNSAddresses    []netip.Addr              `json:"dnsAddresses,omitempty"`
 	LocalAddress    netip.Addr                `json:"localAddress"`
 	LocalPrivateKey corev1.SecretKeySelector  `json:"localPrivateKey"`
-	PeerAddress     netip.AddrPort            `json:"peerAddress"`
+	PeerAddress     string                    `json:"peerAddress"`
 	PeerPublicKey   corev1.SecretKeySelector  `json:"peerPublicKey"`
 	PresharedKey    *corev1.SecretKeySelector `json:"presharedKey,omitempty"`
 }
@@ -130,7 +130,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 		return resourceVersion, err
 	}
 
-	sshAddress := p.Spec.SSH.Address.String()
+	sshAddress := p.Spec.SSH.Address
 
 	var hostKeyCallback ssh.HostKeyCallback
 	if p.Spec.SSH.HostKey != nil {
@@ -255,6 +255,6 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 		ipNet = wireGuardNet
 	}
 
-	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress.String())
+	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress)
 	return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
 }

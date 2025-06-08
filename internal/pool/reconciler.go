@@ -57,7 +57,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		}
 	} else {
 		logger.Error(reconcileErr, "reconcile failed")
-		const retryErrorWait = 1 * time.Minute
+		const retryErrorWait = 2 * time.Minute
 		result.RequeueAfter = retryErrorWait
 		statusUpdate.Status = &Status{
 			State:  "Error",

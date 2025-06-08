@@ -22,8 +22,8 @@ type Config struct {
 	ListenPort      int          // Optional: The port number to listen for WireGuard connections.
 	LocalAddress    netip.Addr
 	LocalPrivateKey []byte
-	LogHandler      slog.Handler    // Defaults to slog.Default().
-	PeerAddress     *netip.AddrPort // Optional: The address to connect to a remote WireGuard peer.
+	LogHandler      slog.Handler // Defaults to slog.Default().
+	PeerAddress     *string      // Optional: The address to connect to a remote WireGuard peer.
 	PeerPublicKey   []byte
 	PresharedKey    []byte // Optional, but highly recommended.
 }
@@ -41,7 +41,11 @@ func Start(ctx context.Context, config Config) (*netstack.Net, error) {
 	}
 	var address *net.UDPAddr
 	if config.PeerAddress != nil {
-		address = net.UDPAddrFromAddrPort(*config.PeerAddress)
+		udpAddr, err := net.ResolveUDPAddr("udp", *config.PeerAddress)
+		if err != nil {
+			return nil, err
+		}
+		address = udpAddr
 	}
 	wgConfig := wgtypes.Config{
 		PrivateKey:   toPointer(wgtypes.Key(config.LocalPrivateKey)),

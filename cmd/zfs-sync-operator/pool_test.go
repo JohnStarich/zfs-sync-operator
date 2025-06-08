@@ -104,7 +104,7 @@ config:
 					Name: somePoolName,
 					SSH: &zfspool.SSHSpec{
 						User:    sshUser,
-						Address: sshAddr,
+						Address: sshAddr.String(),
 						PrivateKey: corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{
 								Name: sshSecretName,
@@ -272,7 +272,7 @@ config:
 					Name: somePoolName,
 					SSH: &zfspool.SSHSpec{
 						User:    servers.SSH.User,
-						Address: servers.SSH.Address,
+						Address: servers.SSH.Address.String(),
 						PrivateKey: corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{
 								Name: sshSecretName,
@@ -282,7 +282,7 @@ config:
 					},
 					WireGuard: &zfspool.WireGuardSpec{
 						LocalAddress: servers.WireGuard.LocalAddress,
-						PeerAddress:  servers.WireGuard.PeerAddress,
+						PeerAddress:  servers.WireGuard.PeerAddress.String(),
 						PeerPublicKey: corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
 							Key:                  wireguardSecretKeyPeerPublicKey,
