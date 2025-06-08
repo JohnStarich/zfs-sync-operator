@@ -43,6 +43,8 @@ spec:
                     type: array
                     items:
                       type: string
+                  localAddress:
+                    type: string
                   peerAddress:
                     type: string
                   peerPublicKey:

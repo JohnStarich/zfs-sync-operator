@@ -15,8 +15,9 @@ import (
 )
 
 type Config struct {
-	DNSAddresses  []netip.Addr    // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
-	ListenPort    int             // Optional: The port number to listen for WireGuard connections.
+	DNSAddresses  []netip.Addr // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
+	ListenPort    int          // Optional: The port number to listen for WireGuard connections.
+	LocalAddress  netip.Addr
 	LogHandler    slog.Handler    // Defaults to slog.Default().
 	PeerAddress   *netip.AddrPort // Optional: The address to connect to a remote WireGuard peer.
 	PeerPublicKey []byte
@@ -24,7 +25,7 @@ type Config struct {
 	PrivateKey    []byte
 }
 
-func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*netstack.Net, error) {
+func Connect(ctx context.Context, config Config) (*netstack.Net, error) {
 	var listenPort *int
 	if config.ListenPort != 0 {
 		listenPort = toPointer(config.ListenPort)
@@ -58,7 +59,7 @@ func Connect(ctx context.Context, localAddress netip.Addr, config Config) (*nets
 	if config.LogHandler != nil {
 		logger = slog.New(config.LogHandler)
 	}
-	iface := newInterface(logger, localAddress, config.DNSAddresses)
+	iface := newInterface(logger, config.LocalAddress, config.DNSAddresses)
 	device, dialer, err := iface.Start(ctx)
 	if err != nil {
 		return nil, err

@@ -21,7 +21,8 @@ func StartTestServer(tb testing.TB, addr netip.Addr, presharedKey, privateKey, p
 	require.NoError(tb, err)
 	listenAddr := conn.LocalAddr().(*net.UDPAddr).AddrPort()
 	require.NoError(tb, conn.Close())
-	serverNet, err := Connect(ctx, addr, Config{
+	serverNet, err := Connect(ctx, Config{
+		LocalAddress:  addr,
 		LogHandler:    testlog.NewLogHandler(tb, slog.LevelInfo),
 		PresharedKey:  presharedKey[:],
 		PrivateKey:    privateKey[:],

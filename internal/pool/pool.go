@@ -75,6 +75,7 @@ type SSHSpec struct {
 
 type WireGuardSpec struct {
 	DNSAddresses  []netip.Addr              `json:"dnsAddresses,omitempty"`
+	LocalAddress  netip.Addr                `json:"localAddress"`
 	PeerAddress   netip.AddrPort            `json:"peerAddress"`
 	PeerPublicKey corev1.SecretKeySelector  `json:"peerPublicKey"`
 	PresharedKey  *corev1.SecretKeySelector `json:"presharedKey,omitempty"`
@@ -112,6 +113,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 		return err
 	}
 	defer conn.Close()
+	logger.Info("SSH TCP connection established")
 
 	sshPrivateKey, err := getSecretKey(ctx, client, p.Namespace, p.Spec.SSH.PrivateKey)
 	if err != nil {
@@ -187,9 +189,9 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 			}
 		}
 
-		localAddr := arbitraryUnusedIP(wireGuardSpec.PeerAddress.Addr())
-		wireGuardNet, err := wireguard.Connect(ctx, localAddr, wireguard.Config{
+		wireGuardNet, err := wireguard.Connect(ctx, wireguard.Config{
 			DNSAddresses:  wireGuardSpec.DNSAddresses,
+			LocalAddress:  wireGuardSpec.LocalAddress,
 			LogHandler:    logr.ToSlogHandler(logger),
 			PeerAddress:   &wireGuardSpec.PeerAddress,
 			PeerPublicKey: peerPublicKey,
@@ -199,18 +201,10 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 		if err != nil {
 			return nil, err
 		}
-		logger.Info("Connected to WireGuard peer", "peer", wireGuardSpec.PeerAddress, "local ip", localAddr)
+		logger.Info("Connected to WireGuard peer", "peer", wireGuardSpec.PeerAddress, "local ip", wireGuardSpec.LocalAddress)
 		ipNet = wireGuardNet
 	}
 
 	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress.String())
 	return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
-}
-
-func arbitraryUnusedIP(usedIP netip.Addr) netip.Addr {
-	arbitraryIP := netip.MustParseAddr("10.3.0.1")
-	if usedIP == arbitraryIP {
-		return netip.MustParseAddr("10.3.0.2")
-	}
-	return arbitraryIP
 }

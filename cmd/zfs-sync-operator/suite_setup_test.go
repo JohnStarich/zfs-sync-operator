@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
@@ -77,6 +78,7 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 		MetricsPort:       "0",
 		Namespace:         namespace,
 		idempotentMetrics: true,
+		maxSessionWait:    8 * time.Second,
 	})
 	if err != nil {
 		tb.Fatal(err)

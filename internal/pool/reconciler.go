@@ -18,12 +18,16 @@ import (
 
 // Reconciler reconciles Pool resources to validate their Pools and associated connections
 type Reconciler struct {
-	client ctrlclient.Client
+	client         ctrlclient.Client
+	maxSessionWait time.Duration
 }
 
 // NewReconciler returns a new pool reconciler
-func NewReconciler(client ctrlclient.Client) *Reconciler {
-	return &Reconciler{client: client}
+func NewReconciler(client ctrlclient.Client, maxSessionWait time.Duration) *Reconciler {
+	return &Reconciler{
+		client:         client,
+		maxSessionWait: maxSessionWait,
+	}
 }
 
 // Reconcile implements [reconcile.Reconciler]
@@ -68,8 +72,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
-	const maxSessionWait = 8 * time.Second
-	ctx, cancel := context.WithTimeout(ctx, maxSessionWait)
+	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
 
 	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)

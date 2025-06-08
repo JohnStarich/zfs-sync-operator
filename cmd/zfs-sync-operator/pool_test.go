@@ -248,7 +248,8 @@ config:
 						},
 					},
 					WireGuard: &zfspool.WireGuardSpec{
-						PeerAddress: servers.WireGuard.PeerAddress,
+						LocalAddress: servers.WireGuard.LocalAddress,
+						PeerAddress:  servers.WireGuard.PeerAddress,
 						PeerPublicKey: corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
 							Key:                  wireguardSecretKeyPeerPublicKey,
@@ -295,6 +296,7 @@ type TestSSH struct {
 
 type TestWireGuard struct {
 	ClientPrivateKey []byte
+	LocalAddress     netip.Addr
 	PeerAddress      netip.AddrPort
 	PresharedKey     []byte
 	ServerPublicKey  []byte // TODO ban wireguard "server" and "client". find a different, more idiomatic way to describe these
@@ -312,9 +314,10 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecRes
 	require.NoError(tb, err)
 	clientPublicKey := clientPrivateKey.PublicKey()
 
-	remoteWireGuardInternalAddr := netip.MustParseAddr("10.3.0.2")
-	wireguardNet, wireguardAddr := wireguard.StartTestServer(tb, remoteWireGuardInternalAddr, presharedKey, serverPrivateKey, clientPublicKey)
-	sshListener, err := wireguardNet.ListenTCPAddrPort(netip.AddrPortFrom(remoteWireGuardInternalAddr, 0))
+	remoteWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.2")
+	localWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.3")
+	wireguardNet, wireguardAddr := wireguard.StartTestServer(tb, remoteWireGuardInterfaceAddr, presharedKey, serverPrivateKey, clientPublicKey)
+	sshListener, err := wireguardNet.ListenTCPAddrPort(netip.AddrPortFrom(remoteWireGuardInterfaceAddr, 0))
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
 		require.NoError(tb, sshListener.Close())
@@ -333,6 +336,7 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecRes
 		},
 		WireGuard: TestWireGuard{
 			ClientPrivateKey: clientPrivateKey[:],
+			LocalAddress:     localWireGuardInterfaceAddr,
 			PeerAddress:      wireguardAddr,
 			PresharedKey:     presharedKey[:],
 			ServerPublicKey:  serverPublicKey[:],

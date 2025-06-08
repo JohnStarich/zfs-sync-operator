@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
@@ -85,13 +86,17 @@ type Config struct {
 	LogHandler        slog.Handler
 	MetricsPort       string
 	Namespace         string
-	idempotentMetrics bool // disables safety checks for double metrics registrations
+	idempotentMetrics bool          // disables safety checks for double metrics registrations
+	maxSessionWait    time.Duration // allows tests to shorten wait times for faster pass/fail results
 }
 
 // New returns a new [Operator]
 func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, error) {
 	if c.MetricsPort == "" {
 		c.MetricsPort = "8080"
+	}
+	if c.maxSessionWait == 0 {
+		c.maxSessionWait = 1 * time.Minute
 	}
 	logger := logr.FromSlogHandler(c.LogHandler)
 
@@ -129,7 +134,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	}
 	{ // Pool
 		ctrl, err := controller.New("pool", mgr, controller.Options{
-			Reconciler: pool.NewReconciler(mgr.GetClient()),
+			Reconciler: pool.NewReconciler(mgr.GetClient(), c.maxSessionWait),
 		})
 		if err != nil {
 			return nil, err

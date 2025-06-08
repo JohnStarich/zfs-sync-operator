@@ -86,7 +86,8 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	clientNet, err := Connect(ctx, addr, Config{
+	clientNet, err := Connect(ctx, Config{
+		LocalAddress:  addr,
 		LogHandler:    testlog.NewLogHandler(t, slog.LevelDebug),
 		PresharedKey:  presharedKey[:],
 		PrivateKey:    privateKey[:],
