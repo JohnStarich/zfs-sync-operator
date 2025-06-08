@@ -27,7 +27,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 	backup.Status.State = "Ready"
-	if err := r.client.Update(ctx, &backup); err != nil {
+	if err := r.client.Status().Update(ctx, &backup); err != nil {
 		return reconcile.Result{}, err
 	}
 	return reconcile.Result{}, nil

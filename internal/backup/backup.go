@@ -3,26 +3,27 @@ package backup
 
 import (
 	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-// MustScheme returns a new Backup scheme
-func MustScheme() *runtime.Scheme {
+// MustAddToScheme adds the Pool scheme to s
+func MustAddToScheme(s *runtime.Scheme) {
 	schemeBuilder := &scheme.Builder{
 		GroupVersion: schema.GroupVersion{
-			Group:   "zfs-sync-operator.johnstarich.com",
+			Group:   name.Operator + ".johnstarich.com",
 			Version: "v1alpha1",
 		},
 	}
 	schemeBuilder.Register(&Backup{}, &BackupList{})
-	scheme, err := schemeBuilder.Build()
+	err := schemeBuilder.AddToScheme(s)
 	if err != nil {
 		panic(err)
 	}
-	return scheme
 }
 
 // Backup represents a template to execute new backups, to send ZFS snapshots between hosts
@@ -39,8 +40,8 @@ func (b *Backup) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(b
 
 // Spec defines the desired offsite [Backup] source and destination
 type Spec struct {
-	Source      string `json:"source"`
-	Destination string `json:"destination"`
+	Source      corev1.LocalObjectReference `json:"source"`
+	Destination corev1.LocalObjectReference `json:"destination"`
 }
 
 // Status holds status information for a [Backup]
