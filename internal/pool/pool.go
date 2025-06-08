@@ -78,12 +78,12 @@ type SSHSpec struct {
 
 // WireGuardSpec defines the WireGuard connection details for a [Pool]
 type WireGuardSpec struct {
-	DNSAddresses  []netip.Addr              `json:"dnsAddresses,omitempty"`
-	LocalAddress  netip.Addr                `json:"localAddress"`
-	PeerAddress   netip.AddrPort            `json:"peerAddress"`
-	PeerPublicKey corev1.SecretKeySelector  `json:"peerPublicKey"`
-	PresharedKey  *corev1.SecretKeySelector `json:"presharedKey,omitempty"`
-	PrivateKey    corev1.SecretKeySelector  `json:"privateKey"`
+	DNSAddresses    []netip.Addr              `json:"dnsAddresses,omitempty"`
+	LocalAddress    netip.Addr                `json:"localAddress"`
+	LocalPrivateKey corev1.SecretKeySelector  `json:"localPrivateKey"`
+	PeerAddress     netip.AddrPort            `json:"peerAddress"`
+	PeerPublicKey   corev1.SecretKeySelector  `json:"peerPublicKey"`
+	PresharedKey    *corev1.SecretKeySelector `json:"presharedKey,omitempty"`
 }
 
 // Status holds status information for a [Pool]
@@ -236,7 +236,7 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 		if err != nil {
 			return nil, errors.WithMessage(err, "wireguard peer public key")
 		}
-		privateKey, err := getSecretKey(ctx, client, p.Namespace, wireGuardSpec.PrivateKey)
+		localPrivateKey, err := getSecretKey(ctx, client, p.Namespace, wireGuardSpec.LocalPrivateKey)
 		if err != nil {
 			return nil, errors.WithMessage(err, "wireguard private key")
 		}
@@ -249,13 +249,13 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 		}
 
 		wireGuardNet, err := wireguard.Start(ctx, wireguard.Config{
-			DNSAddresses:  wireGuardSpec.DNSAddresses,
-			LocalAddress:  wireGuardSpec.LocalAddress,
-			LogHandler:    logr.ToSlogHandler(logger),
-			PeerAddress:   &wireGuardSpec.PeerAddress,
-			PeerPublicKey: peerPublicKey,
-			PresharedKey:  presharedKey,
-			PrivateKey:    privateKey,
+			DNSAddresses:    wireGuardSpec.DNSAddresses,
+			LocalAddress:    wireGuardSpec.LocalAddress,
+			LocalPrivateKey: localPrivateKey,
+			LogHandler:      logr.ToSlogHandler(logger),
+			PeerAddress:     &wireGuardSpec.PeerAddress,
+			PeerPublicKey:   peerPublicKey,
+			PresharedKey:    presharedKey,
 		})
 		if err != nil {
 			return nil, err

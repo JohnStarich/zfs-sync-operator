@@ -92,12 +92,12 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	clientNet, err := Start(ctx, Config{
-		LocalAddress:  addr,
-		LogHandler:    testlog.NewLogHandler(t, slog.LevelDebug),
-		PresharedKey:  presharedKey[:],
-		PrivateKey:    privateKey[:],
-		PeerPublicKey: peerPublicKey[:],
-		PeerAddress:   &peerAddr,
+		LocalAddress:    addr,
+		LogHandler:      testlog.NewLogHandler(t, slog.LevelDebug),
+		PresharedKey:    presharedKey[:],
+		LocalPrivateKey: privateKey[:],
+		PeerPublicKey:   peerPublicKey[:],
+		PeerAddress:     &peerAddr,
 	})
 	require.NoError(t, err)
 	return &http.Client{

@@ -45,6 +45,13 @@ spec:
                       type: string
                   localAddress:
                     type: string
+                  localPrivateKey:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      key:
+                        type: string
                   peerAddress:
                     type: string
                   peerPublicKey:
@@ -55,13 +62,6 @@ spec:
                       key:
                         type: string
                   presharedKey:
-                    type: object
-                    properties:
-                      name:
-                        type: string
-                      key:
-                        type: string
-                  privateKey:
                     type: object
                     properties:
                       name:

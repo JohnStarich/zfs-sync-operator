@@ -135,9 +135,9 @@ func TestPoolWithSSHOverWireGuard(t *testing.T) {
 	t.Parallel()
 	const somePoolName = "somepool"
 	const (
-		wireguardSecretKeyPeerPublicKey = "peer-public-key"
-		wireguardSecretKeyPresharedKey  = "preshared-key"
-		wireguardSecretKeyPrivateKey    = "private-key"
+		wireguardSecretKeyPeerPublicKey   = "peer-public-key"
+		wireguardSecretKeyPresharedKey    = "preshared-key"
+		wireguardSecretKeyLocalPrivateKey = "local-private-key"
 	)
 	for _, tc := range []struct {
 		description           string
@@ -191,11 +191,11 @@ config:
 		{
 			description: "invalid wireguard configuration",
 			mutateWireGuardSecret: func(validSecretData map[string][]byte) {
-				bustedPrivateKey := validSecretData[wireguardSecretKeyPrivateKey]
+				bustedPrivateKey := validSecretData[wireguardSecretKeyLocalPrivateKey]
 				bustedPrivateKey[2] = 'f'
 				bustedPrivateKey[3] = 'o'
 				bustedPrivateKey[4] = 'o'
-				validSecretData[wireguardSecretKeyPrivateKey] = bustedPrivateKey
+				validSecretData[wireguardSecretKeyLocalPrivateKey] = bustedPrivateKey
 			},
 			execResults: map[string]ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
@@ -254,9 +254,9 @@ config:
 			}))
 
 			wireguardSecretData := map[string][]byte{
-				wireguardSecretKeyPeerPublicKey: servers.WireGuard.ServerPublicKey,
-				wireguardSecretKeyPresharedKey:  servers.WireGuard.PresharedKey,
-				wireguardSecretKeyPrivateKey:    servers.WireGuard.ClientPrivateKey,
+				wireguardSecretKeyPeerPublicKey:   servers.WireGuard.PeerPublicKey,
+				wireguardSecretKeyPresharedKey:    servers.WireGuard.PresharedKey,
+				wireguardSecretKeyLocalPrivateKey: servers.WireGuard.LocalPrivateKey,
 			}
 			if tc.mutateWireGuardSecret != nil {
 				tc.mutateWireGuardSecret(wireguardSecretData)
@@ -291,9 +291,9 @@ config:
 							LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
 							Key:                  wireguardSecretKeyPresharedKey,
 						},
-						PrivateKey: corev1.SecretKeySelector{
+						LocalPrivateKey: corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
-							Key:                  wireguardSecretKeyPrivateKey,
+							Key:                  wireguardSecretKeyLocalPrivateKey,
 						},
 					},
 				},
@@ -332,28 +332,28 @@ type TestSSH struct {
 }
 
 type TestWireGuard struct {
-	ClientPrivateKey []byte
-	LocalAddress     netip.Addr
-	PeerAddress      netip.AddrPort
-	PresharedKey     []byte
-	ServerPublicKey  []byte // TODO ban wireguard "server" and "client". find a different, more idiomatic way to describe these
+	LocalAddress    netip.Addr
+	LocalPrivateKey []byte
+	PeerAddress     netip.AddrPort
+	PeerPublicKey   []byte
+	PresharedKey    []byte
 }
 
 func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecResult) TestSSHOverWireGuard {
 	presharedKey, err := wgtypes.GenerateKey()
 	require.NoError(tb, err)
 
-	serverPrivateKey, err := wgtypes.GeneratePrivateKey()
+	peerPrivateKey, err := wgtypes.GeneratePrivateKey()
 	require.NoError(tb, err)
-	serverPublicKey := serverPrivateKey.PublicKey()
+	peerPublicKey := peerPrivateKey.PublicKey()
 
-	clientPrivateKey, err := wgtypes.GeneratePrivateKey()
+	localPrivateKey, err := wgtypes.GeneratePrivateKey()
 	require.NoError(tb, err)
-	clientPublicKey := clientPrivateKey.PublicKey()
+	localPublicKey := localPrivateKey.PublicKey()
 
 	remoteWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.2")
 	localWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.3")
-	wireguardNet, wireguardAddr := wireguard.StartTest(tb, remoteWireGuardInterfaceAddr, presharedKey, serverPrivateKey, clientPublicKey)
+	wireguardNet, wireguardAddr := wireguard.StartTest(tb, remoteWireGuardInterfaceAddr, presharedKey, peerPrivateKey, localPublicKey)
 	sshListener, err := wireguardNet.ListenTCPAddrPort(netip.AddrPortFrom(remoteWireGuardInterfaceAddr, 0))
 	require.NoError(tb, err)
 	tb.Cleanup(func() {
@@ -373,11 +373,11 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecRes
 			User:             sshUser,
 		},
 		WireGuard: TestWireGuard{
-			ClientPrivateKey: clientPrivateKey[:],
-			LocalAddress:     localWireGuardInterfaceAddr,
-			PeerAddress:      wireguardAddr,
-			PresharedKey:     presharedKey[:],
-			ServerPublicKey:  serverPublicKey[:],
+			LocalAddress:    localWireGuardInterfaceAddr,
+			LocalPrivateKey: localPrivateKey[:],
+			PeerAddress:     wireguardAddr,
+			PeerPublicKey:   peerPublicKey[:],
+			PresharedKey:    presharedKey[:],
 		},
 	}
 }

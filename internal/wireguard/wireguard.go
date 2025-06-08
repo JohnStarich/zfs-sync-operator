@@ -18,14 +18,14 @@ import (
 
 // Config contains data to configure a WireGuard connection
 type Config struct {
-	DNSAddresses  []netip.Addr // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
-	ListenPort    int          // Optional: The port number to listen for WireGuard connections.
-	LocalAddress  netip.Addr
-	LogHandler    slog.Handler    // Defaults to slog.Default().
-	PeerAddress   *netip.AddrPort // Optional: The address to connect to a remote WireGuard peer.
-	PeerPublicKey []byte
-	PresharedKey  []byte // Optional, but highly recommended.
-	PrivateKey    []byte
+	DNSAddresses    []netip.Addr // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
+	ListenPort      int          // Optional: The port number to listen for WireGuard connections.
+	LocalAddress    netip.Addr
+	LocalPrivateKey []byte
+	LogHandler      slog.Handler    // Defaults to slog.Default().
+	PeerAddress     *netip.AddrPort // Optional: The address to connect to a remote WireGuard peer.
+	PeerPublicKey   []byte
+	PresharedKey    []byte // Optional, but highly recommended.
 }
 
 // Start starts a new WireGuard interface and configures it with details from a [Config].
@@ -44,7 +44,7 @@ func Start(ctx context.Context, config Config) (*netstack.Net, error) {
 		address = net.UDPAddrFromAddrPort(*config.PeerAddress)
 	}
 	wgConfig := wgtypes.Config{
-		PrivateKey:   toPointer(wgtypes.Key(config.PrivateKey)),
+		PrivateKey:   toPointer(wgtypes.Key(config.LocalPrivateKey)),
 		ListenPort:   listenPort,
 		ReplacePeers: true,
 		Peers: []wgtypes.PeerConfig{
