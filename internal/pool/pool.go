@@ -93,6 +93,7 @@ type Status struct {
 	SSH    *SSHStatus `json:"ssh,omitempty"`
 }
 
+// SSHStatus holds the last SSH connection details to verify the server's public key matches new connections
 type SSHStatus struct {
 	Address string `json:"address"`
 	HostKey []byte `json:"hostKey"` // The SSH host's public key. Used for verification after the pool's first connection.
@@ -138,7 +139,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 
 	var hostKeyCallback ssh.HostKeyCallback
 	if p.Status != nil && p.Status.SSH != nil && sshAddress == p.Status.SSH.Address {
-		key, err := ssh.ParsePublicKey([]byte(p.Status.SSH.HostKey))
+		key, err := ssh.ParsePublicKey(p.Status.SSH.HostKey)
 		if err != nil {
 			return errors.WithMessage(err, "parse spec.status.sshHostKey")
 		}
