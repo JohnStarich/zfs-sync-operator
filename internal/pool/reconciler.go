@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,47 +37,44 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err := r.client.Get(ctx, request.NamespacedName, &pool); err != nil {
 		return reconcile.Result{}, err
 	}
-	logger.Info("got pool", "status", pool.Status, "pool", pool.Spec)
-	if pool.Status != nil && pool.Status.State != nil && *pool.Status.State == "Online" { // TODO verify nothing has changed
-		// TODO can we ignore status field changes? only ack spec or secret updates?
-		return reconcile.Result{}, nil
-	}
-
-	state, reason, reconcileErr := r.reconcile(ctx, pool)
+	logger.Info("got pool", "pool", pool.Spec, "generation", pool.Generation)
+	resourceVersion, state, reason, reconcileErr := r.reconcile(ctx, pool)
 
 	result := reconcile.Result{}
-	poolStatusPatch := Pool{
-		TypeMeta:   typeMeta(),
-		ObjectMeta: metav1.ObjectMeta{Name: request.Name, Namespace: request.Namespace},
+	statusUpdate := Pool{
+		TypeMeta: typeMeta(),
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            request.Name,
+			Namespace:       request.Namespace,
+			ResourceVersion: resourceVersion,
+		},
 	}
 	if reconcileErr == nil {
 		logger.Info("pool detected successfully", "state", state)
-		poolStatusPatch.Status = &Status{
-			State:  toPointer(state),
-			Reason: toPointer(reason),
+		statusUpdate.Status = &Status{
+			State:  state,
+			Reason: reason,
 		}
 	} else {
 		logger.Error(reconcileErr, "reconcile failed")
 		const retryErrorWait = 1 * time.Minute
 		result.RequeueAfter = retryErrorWait
-		poolStatusPatch.Status = &Status{
-			State:  toPointer("Error"),
-			Reason: toPointer(reconcileErr.Error()),
+		statusUpdate.Status = &Status{
+			State:  "Error",
+			Reason: reconcileErr.Error(),
 		}
 	}
-	statusErr := r.client.Patch(ctx, &poolStatusPatch, ctrlclient.Merge, &ctrlclient.PatchOptions{
-		FieldManager: name.Operator,
-	})
+	statusErr := r.client.Status().Update(ctx, &statusUpdate)
 	return result, errors.Wrap(statusErr, "failed to update status")
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state, reason string, returnedErr error) {
+func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (resourceVersion, state, reason string, returnedErr error) {
 	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
 
 	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
 	var zpoolStatus []byte
-	err := pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
+	resourceVersion, err := pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
 		var err error
 		zpoolStatus, err = session.CombinedOutput(command)
 		zpoolStatus = bytes.TrimSpace(zpoolStatus)
@@ -86,12 +82,12 @@ func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state, reason st
 	})
 	if err != nil {
 		if bytes.HasSuffix(zpoolStatus, []byte(": no such pool")) {
-			return "NotFound", string(zpoolStatus), nil
+			return resourceVersion, "NotFound", string(zpoolStatus), nil
 		}
-		return "", "", err
+		return resourceVersion, "", "", err
 	}
 	stateField := stateFieldFromZpoolStatus(zpoolStatus)
-	return stateFromStateField(stateField), "", nil
+	return resourceVersion, stateFromStateField(stateField), "", nil
 }
 
 // stateFieldFromZpoolStatus parses the plain text output of 'zpool status <pool>'.

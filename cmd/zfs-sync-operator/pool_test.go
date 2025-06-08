@@ -54,8 +54,8 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  toPointer("Online"),
-				Reason: toPointer(""),
+				State:  "Online",
+				Reason: "",
 			},
 		},
 		{
@@ -67,8 +67,8 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  toPointer("NotFound"),
-				Reason: toPointer(fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName)),
+				State:  "NotFound",
+				Reason: fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName),
 			},
 		},
 		{
@@ -80,8 +80,8 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  toPointer("Error"),
-				Reason: toPointer(fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName)),
+				State:  "Error",
+				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
 			},
 		},
 	} {
@@ -99,9 +99,8 @@ config:
 					sshPrivateKeySelector: sshClientPrivateKey,
 				},
 			}))
-			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
-				ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
-				Spec: &zfspool.Spec{
+			makeSpec := func() *zfspool.Spec {
+				return &zfspool.Spec{
 					Name: somePoolName,
 					SSH: &zfspool.SSHSpec{
 						User:    sshUser,
@@ -113,19 +112,21 @@ config:
 							Key: sshPrivateKeySelector,
 						},
 					},
-				},
+				}
+			}
+			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+				ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
+				Spec:       makeSpec(),
 			}))
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				pool := zfspool.Pool{
 					ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
 				}
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-				expectStatus := tc.expectStatus
-				expectStatus.SSH = &zfspool.SSHStatus{
-					Address: sshAddr.String(),
-					HostKey: []byte(sshServerPublicKey),
-				}
 				assert.Equal(collect, tc.expectStatus, pool.Status)
+				expectSpec := makeSpec()
+				expectSpec.SSH.HostKey = toPointer([]byte(sshServerPublicKey))
+				assert.Equal(collect, expectSpec, pool.Spec)
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 		})
 	}
@@ -144,7 +145,7 @@ func TestPoolWithSSHOverWireGuard(t *testing.T) {
 		execResults           map[string]ssh.TestExecResult
 		mutateWireGuardSecret func(validSecretData map[string][]byte)
 		expectStatus          *zfspool.Status
-		expectStatusSSH       bool
+		expectSpecHostKey     bool
 	}{
 		{
 			description: "happy path",
@@ -169,10 +170,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  toPointer("Online"),
-				Reason: toPointer(""),
+				State:  "Online",
+				Reason: "",
 			},
-			expectStatusSSH: true,
+			expectSpecHostKey: true,
 		},
 		{
 			description: "pool not found",
@@ -183,10 +184,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  toPointer("NotFound"),
-				Reason: toPointer(fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName)),
+				State:  "NotFound",
+				Reason: fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName),
 			},
-			expectStatusSSH: true,
+			expectSpecHostKey: true,
 		},
 		{
 			description: "invalid wireguard configuration",
@@ -218,10 +219,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  toPointer("Error"),
-				Reason: toPointer(`dial SSH server %s: context deadline exceeded`),
+				State:  "Error",
+				Reason: `dial SSH server %s: context deadline exceeded`,
 			},
-			expectStatusSSH: false,
+			expectSpecHostKey: false,
 		},
 		{
 			description: "unexpected command error",
@@ -232,10 +233,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  toPointer("Error"),
-				Reason: toPointer(fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName)),
+				State:  "Error",
+				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
 			},
-			expectStatusSSH: true,
+			expectSpecHostKey: true,
 		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
@@ -266,9 +267,8 @@ config:
 				ObjectMeta: metav1.ObjectMeta{Name: wireguardSecretName, Namespace: run.Namespace},
 				Data:       wireguardSecretData,
 			}))
-			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
-				ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
-				Spec: &zfspool.Spec{
+			makeSpec := func() *zfspool.Spec {
+				return &zfspool.Spec{
 					Name: somePoolName,
 					SSH: &zfspool.SSHSpec{
 						User:    servers.SSH.User,
@@ -296,24 +296,26 @@ config:
 							Key:                  wireguardSecretKeyLocalPrivateKey,
 						},
 					},
-				},
+				}
+			}
+			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+				ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
+				Spec:       makeSpec(),
 			}))
-			if strings.ContainsRune(*tc.expectStatus.Reason, '%') {
-				tc.expectStatus.Reason = toPointer(fmt.Sprintf(*tc.expectStatus.Reason, servers.SSH.Address.String()))
+			if strings.ContainsRune(tc.expectStatus.Reason, '%') {
+				tc.expectStatus.Reason = fmt.Sprintf(tc.expectStatus.Reason, servers.SSH.Address.String())
 			}
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				pool := zfspool.Pool{
 					ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
 				}
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-				expectStatus := tc.expectStatus
-				if tc.expectStatusSSH {
-					expectStatus.SSH = &zfspool.SSHStatus{
-						Address: servers.SSH.Address.String(),
-						HostKey: []byte(servers.SSH.ServerPublicKey),
-					}
+				assert.Equal(collect, tc.expectStatus, pool.Status)
+				if tc.expectSpecHostKey {
+					expectSpec := makeSpec()
+					expectSpec.SSH.HostKey = toPointer([]byte(servers.SSH.ServerPublicKey))
+					assert.Equal(t, expectSpec, pool.Spec)
 				}
-				assert.Equal(collect, expectStatus, pool.Status)
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 		})
 	}
