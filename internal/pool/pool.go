@@ -141,7 +141,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 	if p.Status != nil && p.Status.SSH != nil && sshAddress == p.Status.SSH.Address {
 		key, err := ssh.ParsePublicKey(p.Status.SSH.HostKey)
 		if err != nil {
-			return errors.WithMessage(err, "parse spec.status.sshHostKey")
+			return errors.WithMessage(err, "parse spec.status.ssh.hostKey")
 		}
 		hostKeyCallback = ssh.FixedHostKey(key)
 	} else {
