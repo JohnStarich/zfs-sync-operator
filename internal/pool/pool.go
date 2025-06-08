@@ -88,8 +88,14 @@ type WireGuardSpec struct {
 
 // Status holds status information for a [Pool]
 type Status struct {
-	State  string `json:"state"`
-	Reason string `json:"reason"`
+	State  *string    `json:"state"`
+	Reason *string    `json:"reason"`
+	SSH    *SSHStatus `json:"ssh,omitempty"`
+}
+
+type SSHStatus struct {
+	Address string `json:"address"`
+	HostKey []byte `json:"hostKey"` // The SSH host's public key. Used for verification after the pool's first connection.
 }
 
 // PoolList is a list of [Pool]. Required to perform a Watch.
@@ -127,13 +133,38 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 	if err != nil {
 		return err
 	}
+
+	sshAddress := p.Spec.SSH.Address.String()
+
+	var hostKeyCallback ssh.HostKeyCallback
+	if p.Status != nil && p.Status.SSH != nil && sshAddress == p.Status.SSH.Address {
+		key, err := ssh.ParsePublicKey([]byte(p.Status.SSH.HostKey))
+		if err != nil {
+			return errors.WithMessage(err, "parse spec.status.sshHostKey")
+		}
+		hostKeyCallback = ssh.FixedHostKey(key)
+	} else {
+		hostKeyCallback = ssh.HostKeyCallback(func(_ string, _ net.Addr, key ssh.PublicKey) error {
+			return client.Patch(ctx, &Pool{
+				TypeMeta:   typeMeta(),
+				ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace},
+				Status: &Status{
+					SSH: &SSHStatus{
+						Address: sshAddress,
+						HostKey: key.Marshal(),
+					},
+				},
+			}, ctrlclient.Merge, &ctrlclient.PatchOptions{FieldManager: name.Operator})
+		})
+	}
+
 	config := ssh.ClientConfig{
 		User:            p.Spec.SSH.User,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO Remember last host key. Put in status?
+		HostKeyCallback: hostKeyCallback,
 	}
-	logger.Info("connecting via SSH", "address", p.Spec.SSH.Address)
-	sshConn, channels, requests, err := ssh.NewClientConn(conn, p.Spec.SSH.Address.String(), &config)
+	logger.Info("connecting via SSH", "address", sshAddress)
+	sshConn, channels, requests, err := ssh.NewClientConn(conn, sshAddress, &config)
 	if err != nil {
 		return err
 	}

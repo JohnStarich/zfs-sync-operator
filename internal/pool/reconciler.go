@@ -39,7 +39,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 	logger.Info("got pool", "status", pool.Status, "pool", pool.Spec)
-	if pool.Status != nil && pool.Status.State == "Online" { // TODO verify nothing has changed
+	if pool.Status != nil && pool.Status.State != nil && *pool.Status.State == "Online" { // TODO verify nothing has changed
 		// TODO can we ignore status field changes? only ack spec or secret updates?
 		return reconcile.Result{}, nil
 	}
@@ -54,19 +54,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if reconcileErr == nil {
 		logger.Info("pool detected successfully", "state", state)
 		poolStatusPatch.Status = &Status{
-			State:  state,
-			Reason: reason,
+			State:  toPointer(state),
+			Reason: toPointer(reason),
 		}
 	} else {
 		logger.Error(reconcileErr, "reconcile failed")
 		const retryErrorWait = 1 * time.Minute
 		result.RequeueAfter = retryErrorWait
 		poolStatusPatch.Status = &Status{
-			State:  "Error",
-			Reason: reconcileErr.Error(),
+			State:  toPointer("Error"),
+			Reason: toPointer(reconcileErr.Error()),
 		}
 	}
-	statusErr := r.client.Patch(ctx, &poolStatusPatch, ctrlclient.Apply, &ctrlclient.PatchOptions{
+	statusErr := r.client.Patch(ctx, &poolStatusPatch, ctrlclient.Merge, &ctrlclient.PatchOptions{
 		FieldManager: name.Operator,
 	})
 	return result, errors.Wrap(statusErr, "failed to update status")
@@ -122,4 +122,8 @@ func stateFromStateField(state string) string {
 		// TODO handle all known zpool states
 		return "Unknown"
 	}
+}
+
+func toPointer[Value any](value Value) *Value {
+	return &value
 }

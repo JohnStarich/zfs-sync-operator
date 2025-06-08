@@ -75,6 +75,14 @@ spec:
                 type: string
               reason:
                 type: string
+              ssh:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  hostKey:
+                    type: string
+                    format: byte
     selectableFields: []
     additionalPrinterColumns:
     - jsonPath: .spec.name

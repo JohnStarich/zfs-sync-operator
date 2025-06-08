@@ -36,14 +36,24 @@ type TestExecResult struct {
 }
 
 // TestServer starts an SSH server and returns the user and private key to use
-func TestServer(tb testing.TB, config TestConfig) (user, privateKey string, address netip.AddrPort) {
+func TestServer(tb testing.TB, config TestConfig) (user, clientPrivateKey, serverPublicKey string, address netip.AddrPort) {
 	tb.Helper()
-	rsaPrivateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
+	clientRSAPrivateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
 	require.NoError(tb, err)
-	privateKey = string(pem.EncodeToMemory(&pem.Block{
+	clientPrivateKey = string(pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(rsaPrivateKey),
+		Bytes: x509.MarshalPKCS1PrivateKey(clientRSAPrivateKey),
 	}))
+
+	serverRSAPrivateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
+	require.NoError(tb, err)
+	serverPrivateKeyBytes := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(serverRSAPrivateKey),
+	})
+	serverPrivateKey, err := ssh.ParsePrivateKey(serverPrivateKeyBytes)
+	require.NoError(tb, err)
+	serverPublicKey = string(serverPrivateKey.PublicKey().Marshal())
 
 	if config.Listener == nil {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -56,22 +66,23 @@ func TestServer(tb testing.TB, config TestConfig) (user, privateKey string, addr
 	tcpAddress, isTCPAddress := config.Listener.Addr().(*net.TCPAddr)
 	require.True(tb, isTCPAddress, "Listener address must have a port")
 	address = tcpAddress.AddrPort()
+
 	user = "some-user"
-	go run(tb, config.Listener, user, rsaPrivateKey.Public(), config)
-	return user, privateKey, address
+	go run(tb, config.Listener, user, clientRSAPrivateKey.Public(), serverPrivateKey, config)
+	return user, clientPrivateKey, serverPublicKey, address
 }
 
 const publicKeyFingerprintExtension = "pubkey-fp"
 
-func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKey crypto.PublicKey, config TestConfig) {
+func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKey crypto.PublicKey, serverPrivateKey ssh.Signer, config TestConfig) {
 	tb.Helper()
-	publicKey, err := ssh.NewPublicKey(clientPublicKey)
+	sshClientPublicKey, err := ssh.NewPublicKey(clientPublicKey)
 	require.NoError(tb, err)
-	publicKeyString := string(publicKey.Marshal())
+	sshClientPublicKeyString := string(sshClientPublicKey.Marshal())
 
 	serverConfig := ssh.ServerConfig{
 		PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
-			if clientUser == c.User() && publicKeyString == string(pubKey.Marshal()) {
+			if clientUser == c.User() && sshClientPublicKeyString == string(pubKey.Marshal()) {
 				return &ssh.Permissions{
 					Extensions: map[string]string{
 						publicKeyFingerprintExtension: ssh.FingerprintSHA256(pubKey),
@@ -81,15 +92,8 @@ func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKe
 			return nil, errors.Errorf("unknown public key for %q", c.User())
 		},
 	}
-	privateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
-	require.NoError(tb, err)
-	privateKeyBytes := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
-	})
-	sshPrivateKey, err := ssh.ParsePrivateKey(privateKeyBytes)
-	require.NoError(tb, err)
-	serverConfig.AddHostKey(sshPrivateKey)
+	serverConfig.AddHostKey(serverPrivateKey)
+
 	for {
 		netConn, err := listener.Accept()
 		if err != nil {

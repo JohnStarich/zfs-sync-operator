@@ -54,8 +54,8 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Online",
-				Reason: "",
+				State:  toPointer("Online"),
+				Reason: toPointer(""),
 			},
 		},
 		{
@@ -67,8 +67,8 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "NotFound",
-				Reason: fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName),
+				State:  toPointer("NotFound"),
+				Reason: toPointer(fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName)),
 			},
 		},
 		{
@@ -80,15 +80,15 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
-				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
+				State:  toPointer("Error"),
+				Reason: toPointer(fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName)),
 			},
 		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
 			run := RunTest(t)
-			sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{ExecResults: tc.execResults})
+			sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{ExecResults: tc.execResults})
 			const (
 				sshSecretName         = "ssh"
 				sshPrivateKeySelector = "private-key"
@@ -96,7 +96,7 @@ config:
 			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: sshSecretName, Namespace: run.Namespace},
 				StringData: map[string]string{
-					sshPrivateKeySelector: sshPrivateKey,
+					sshPrivateKeySelector: sshClientPrivateKey,
 				},
 			}))
 			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
@@ -120,6 +120,11 @@ config:
 					ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
 				}
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
+				expectStatus := tc.expectStatus
+				expectStatus.SSH = &zfspool.SSHStatus{
+					Address: sshAddr.String(),
+					HostKey: []byte(sshServerPublicKey),
+				}
 				assert.Equal(collect, tc.expectStatus, pool.Status)
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 		})
@@ -139,6 +144,7 @@ func TestPoolWithSSHOverWireGuard(t *testing.T) {
 		execResults           map[string]ssh.TestExecResult
 		mutateWireGuardSecret func(validSecretData map[string][]byte)
 		expectStatus          *zfspool.Status
+		expectStatusSSH       bool
 	}{
 		{
 			description: "happy path",
@@ -163,9 +169,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Online",
-				Reason: "",
+				State:  toPointer("Online"),
+				Reason: toPointer(""),
 			},
+			expectStatusSSH: true,
 		},
 		{
 			description: "pool not found",
@@ -176,9 +183,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "NotFound",
-				Reason: fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName),
+				State:  toPointer("NotFound"),
+				Reason: toPointer(fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName)),
 			},
+			expectStatusSSH: true,
 		},
 		{
 			description: "invalid wireguard configuration",
@@ -210,9 +218,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
-				Reason: `dial SSH server %s: context deadline exceeded`,
+				State:  toPointer("Error"),
+				Reason: toPointer(`dial SSH server %s: context deadline exceeded`),
 			},
+			expectStatusSSH: false,
 		},
 		{
 			description: "unexpected command error",
@@ -223,9 +232,10 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
-				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
+				State:  toPointer("Error"),
+				Reason: toPointer(fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName)),
 			},
+			expectStatusSSH: true,
 		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
@@ -239,7 +249,7 @@ config:
 			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: sshSecretName, Namespace: run.Namespace},
 				StringData: map[string]string{
-					sshPrivateKeySelector: servers.SSH.PrivateKey,
+					sshPrivateKeySelector: servers.SSH.ClientPrivateKey,
 				},
 			}))
 
@@ -288,15 +298,22 @@ config:
 					},
 				},
 			}))
-			if strings.ContainsRune(tc.expectStatus.Reason, '%') {
-				tc.expectStatus.Reason = fmt.Sprintf(tc.expectStatus.Reason, servers.SSH.Address.String())
+			if strings.ContainsRune(*tc.expectStatus.Reason, '%') {
+				tc.expectStatus.Reason = toPointer(fmt.Sprintf(*tc.expectStatus.Reason, servers.SSH.Address.String()))
 			}
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				pool := zfspool.Pool{
 					ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
 				}
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-				assert.Equal(collect, tc.expectStatus, pool.Status)
+				expectStatus := tc.expectStatus
+				if tc.expectStatusSSH {
+					expectStatus.SSH = &zfspool.SSHStatus{
+						Address: servers.SSH.Address.String(),
+						HostKey: []byte(servers.SSH.ServerPublicKey),
+					}
+				}
+				assert.Equal(collect, expectStatus, pool.Status)
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 		})
 	}
@@ -308,9 +325,10 @@ type TestSSHOverWireGuard struct {
 }
 
 type TestSSH struct {
-	Address    netip.AddrPort
-	PrivateKey string
-	User       string
+	Address          netip.AddrPort
+	ClientPrivateKey string
+	ServerPublicKey  string
+	User             string
 }
 
 type TestWireGuard struct {
@@ -342,16 +360,17 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecRes
 		require.NoError(tb, sshListener.Close())
 	})
 
-	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{
+	sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{
 		Listener:    sshListener,
 		ExecResults: execResults,
 	})
 
 	return TestSSHOverWireGuard{
 		SSH: TestSSH{
-			Address:    sshAddr,
-			PrivateKey: sshPrivateKey,
-			User:       sshUser,
+			Address:          sshAddr,
+			ClientPrivateKey: sshClientPrivateKey,
+			ServerPublicKey:  sshServerPublicKey,
+			User:             sshUser,
 		},
 		WireGuard: TestWireGuard{
 			ClientPrivateKey: clientPrivateKey[:],
