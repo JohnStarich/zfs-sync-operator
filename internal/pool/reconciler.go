@@ -9,7 +9,6 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -41,16 +40,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	resourceVersion, state, reason, reconcileErr := r.reconcile(ctx, pool)
 
 	result := reconcile.Result{}
-	statusUpdate := Pool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:            request.Name,
-			Namespace:       request.Namespace,
-			ResourceVersion: resourceVersion,
-		},
-	}
+	pool.ResourceVersion = resourceVersion
 	if reconcileErr == nil {
-		logger.Info("pool detected successfully", "state", state)
-		statusUpdate.Status = &Status{
+		logger.Info("pool reconciled successfully", "state", state)
+		pool.Status = &Status{
 			State:  state,
 			Reason: reason,
 		}
@@ -58,12 +51,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		logger.Error(reconcileErr, "reconcile failed")
 		const retryErrorWait = 2 * time.Minute
 		result.RequeueAfter = retryErrorWait
-		statusUpdate.Status = &Status{
+		pool.Status = &Status{
 			State:  "Error",
 			Reason: reconcileErr.Error(),
 		}
 	}
-	statusErr := r.client.Status().Update(ctx, &statusUpdate)
+	statusErr := r.client.Status().Update(ctx, &pool)
 	return result, errors.Wrap(statusErr, "failed to update status")
 }
 
