@@ -1,3 +1,4 @@
+// Package operator constructs and runs instances of [Operator]
 package operator
 
 import (
@@ -28,6 +29,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
+// Run starts an [Operator] with the given runtime context, CLI args, and output stream.
+// Waits until ctx is canceled, then shuts down and returns.
 func Run(ctx context.Context, args []string, out io.Writer) error {
 	flagSet := flag.NewFlagSet("", flag.ContinueOnError)
 	logLevel := flagSet.Int("log-level", 0, "The log level. Defaults to Info. Use -4 for Debug, 4 for Warn, and 8 for Error.")

@@ -18,6 +18,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// RunTestMain orchestrates a package's tests to run with an envtestrunner. It controls the full lifecycle of the package.
+//
+// Example:
+//
+//	var TestEnv *envtestrunner.Runner
+//
+//	func TestMain(m *testing.M) {
+//	    operator.RunTestMain(m, &TestEnv)
+//	}
+//
+//	func TestFoo(t *testing.T) {
+//		t.Parallel()
+//		run := operator.RunTest(t, TestEnv)
+//		...
+//	}
 func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 	flag.Parse()
 	if testing.Short() {
@@ -38,10 +53,12 @@ func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 	}
 }
 
+// TestRunConfig contains data necessary for running tests. Returned from [RunTest].
 type TestRunConfig struct {
 	Namespace string
 }
 
+// RunTest sets up an [Operator] and a namespace to create resources in. Uses the existing global [envtestrunner.Runner] set up from a [RunTestMain].
 func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestRunConfig) {
 	tb.Helper()
 	ctx, cancel := context.WithCancel(testEnv.Context())
