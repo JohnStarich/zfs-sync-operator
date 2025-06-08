@@ -44,7 +44,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, nil
 	}
 
-	state, reconcileErr := r.reconcile(ctx, pool)
+	state, reason, reconcileErr := r.reconcile(ctx, pool)
 
 	result := reconcile.Result{}
 	poolStatusPatch := Pool{
@@ -54,7 +54,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if reconcileErr == nil {
 		logger.Info("pool detected successfully", "state", state)
 		poolStatusPatch.Status = &Status{
-			State: stateFromStateField(state),
+			State:  state,
+			Reason: reason,
 		}
 	} else {
 		logger.Error(reconcileErr, "reconcile failed")
@@ -71,7 +72,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return result, errors.Wrap(statusErr, "failed to update status")
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, returnedErr error) {
+func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state, reason string, returnedErr error) {
 	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
 
@@ -80,13 +81,17 @@ func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (state string, re
 	err := pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
 		var err error
 		zpoolStatus, err = session.CombinedOutput(command)
-		zpoolStatusStr := strings.TrimSpace(string(zpoolStatus))
-		return errors.Wrapf(err, `failed to run '%s': %s`, command, zpoolStatusStr)
+		zpoolStatus = bytes.TrimSpace(zpoolStatus)
+		return errors.Wrapf(err, `failed to run '%s': %s`, command, string(zpoolStatus))
 	})
 	if err != nil {
-		return "", err
+		if bytes.HasSuffix(zpoolStatus, []byte(": no such pool")) {
+			return "NotFound", string(zpoolStatus), nil
+		}
+		return "", "", err
 	}
-	return stateFieldFromZpoolStatus(zpoolStatus), nil
+	stateField := stateFieldFromZpoolStatus(zpoolStatus)
+	return stateFromStateField(stateField), "", nil
 }
 
 // stateFieldFromZpoolStatus parses the plain text output of 'zpool status <pool>'.

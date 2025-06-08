@@ -67,8 +67,8 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
-				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, somePoolName),
+				State:  "NotFound",
+				Reason: fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName),
 			},
 		},
 		{
@@ -176,8 +176,8 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
-				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, somePoolName),
+				State:  "NotFound",
+				Reason: fmt.Sprintf(`cannot open '%[1]s': no such pool`, somePoolName),
 			},
 		},
 		{
