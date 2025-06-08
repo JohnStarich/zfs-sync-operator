@@ -31,8 +31,8 @@ type Backup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   Spec   `json:"spec,omitempty"`
-	Status Status `json:"status,omitempty"`
+	Spec   Spec    `json:"spec,omitempty"`
+	Status *Status `json:"status,omitempty"`
 }
 
 // DeepCopyObject implements [runtime.Object]
@@ -46,7 +46,8 @@ type Spec struct {
 
 // Status holds status information for a [Backup]
 type Status struct {
-	State string `json:"state,omitempty"`
+	State  string `json:"state"`
+	Reason string `json:"reason"`
 }
 
 // BackupList is a list of [Backup]. Required to perform a Watch.

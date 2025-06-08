@@ -23,6 +23,8 @@ func TestBackup(t *testing.T) {
 	}
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
-		assert.Equal(collect, "Ready", backup.Status.State)
+		if assert.NotNil(collect, backup.Status) {
+			assert.Equal(collect, "Ready", backup.Status.State)
+		}
 	}, 1*time.Second, 10*time.Millisecond)
 }
