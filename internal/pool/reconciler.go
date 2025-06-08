@@ -42,7 +42,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 	result := reconcile.Result{}
 	statusUpdate := Pool{
-		TypeMeta: typeMeta(),
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            request.Name,
 			Namespace:       request.Namespace,

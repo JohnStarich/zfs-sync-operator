@@ -23,30 +23,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-const (
-	group      = name.Operator + ".johnstarich.com"
-	apiVersion = "v1alpha1"
-)
-
 // MustAddToScheme adds the Pool scheme to s
 func MustAddToScheme(s *ctrlruntime.Scheme) {
 	schemeBuilder := &scheme.Builder{
 		GroupVersion: schema.GroupVersion{
-			Group:   group,
-			Version: apiVersion,
+			Group:   name.Operator + ".johnstarich.com",
+			Version: "v1alpha1",
 		},
 	}
 	schemeBuilder.Register(&Pool{}, &PoolList{})
 	err := schemeBuilder.AddToScheme(s)
 	if err != nil {
 		panic(err)
-	}
-}
-
-func typeMeta() metav1.TypeMeta {
-	return metav1.TypeMeta{
-		Kind:       "Pool",
-		APIVersion: group + "/" + apiVersion,
 	}
 }
 
