@@ -71,6 +71,19 @@ config:
 				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, somePoolName),
 			},
 		},
+		{
+			description: "unexpected command error",
+			execResults: map[string]ssh.TestExecResult{
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+					Stdout:   []byte("nope!\n"),
+					ExitCode: 1,
+				},
+			},
+			expectStatus: &zfspool.Status{
+				State:  "Error",
+				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
+			},
+		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
@@ -199,6 +212,19 @@ config:
 			expectStatus: &zfspool.Status{
 				State:  "Error",
 				Reason: `dial SSH server %s: context deadline exceeded`,
+			},
+		},
+		{
+			description: "unexpected command error",
+			execResults: map[string]ssh.TestExecResult{
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+					Stdout:   []byte("nope!\n"),
+					ExitCode: 1,
+				},
+			},
+			expectStatus: &zfspool.Status{
+				State:  "Error",
+				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
 			},
 		},
 	} {
