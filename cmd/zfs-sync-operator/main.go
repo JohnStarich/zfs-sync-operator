@@ -41,6 +41,7 @@ func main() {
 
 func runWithArgs(ctx context.Context, args []string, out io.Writer) error {
 	flagSet := flag.NewFlagSet("", flag.ContinueOnError)
+	logLevel := flagSet.Int("log-level", 0, "The log level. Defaults to Info. Use -4 for Debug, 4 for Warn, and 8 for Error.")
 	err := flagSet.Parse(args)
 	if err != nil {
 		return err
@@ -54,7 +55,7 @@ func runWithArgs(ctx context.Context, args []string, out io.Writer) error {
 	}
 	const operatorNamespace = name.Operator + "-system"
 	o, err := New(ctx, restConfig, Config{
-		LogHandler: slog.NewJSONHandler(out, nil),
+		LogHandler: slog.NewJSONHandler(out, &slog.HandlerOptions{Level: slog.Level(*logLevel)}),
 		Namespace:  operatorNamespace,
 	})
 	if err != nil {
