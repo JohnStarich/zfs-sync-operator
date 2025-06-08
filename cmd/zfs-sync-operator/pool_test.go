@@ -25,116 +25,11 @@ const (
 
 func TestPoolWithOnlySSH(t *testing.T) {
 	t.Parallel()
-	run := RunTest(t)
-	const (
-		foundPool    = "mypool"
-		notFoundPool = "mynotfoundpool"
-	)
-	sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{
-		ExecResults: map[string]ssh.TestExecResult{
-			fmt.Sprintf(`/usr/sbin/zpool status %s`, foundPool): {
-				Stdout: fmt.Appendf(nil, `
-  pool: %[1]s
- state: ONLINE
-config:
-
-        NAME                        STATE     READ WRITE CKSUM
-        %[1]s                       ONLINE       0     0     0
-          raidz2-0                  ONLINE       0     0     0
-            wwn-0x0000000000000000  ONLINE       0     0     0
-            wwn-0x0000000000000000  ONLINE       0     0     0
-            wwn-0x0000000000000000  ONLINE       0     0     0
-            wwn-0x0000000000000000  ONLINE       0     0     0
-
- errors: No known data errors
-`, foundPool),
-				ExitCode: 0,
-			},
-			fmt.Sprintf(`/usr/sbin/zpool status %s`, notFoundPool): {
-				Stdout:   fmt.Appendf(nil, "cannot open '%[1]s': no such pool\n", notFoundPool),
-				ExitCode: 1,
-			},
-		},
-	})
-	const (
-		sshSecretName         = "ssh"
-		sshPrivateKeySelector = "private-key"
-	)
-	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: sshSecretName, Namespace: run.Namespace},
-		StringData: map[string]string{
-			sshPrivateKeySelector: sshPrivateKey,
-		},
-	}))
-	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
-		ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
-		Spec: &zfspool.Spec{
-			Name: foundPool,
-			SSH: &zfspool.SSHSpec{
-				User:    sshUser,
-				Address: sshAddr,
-				PrivateKey: corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: sshSecretName,
-					},
-					Key: sshPrivateKeySelector,
-				},
-			},
-		},
-	}))
-	require.EventuallyWithTf(t, func(collect *assert.CollectT) {
-		pool := zfspool.Pool{
-			ObjectMeta: metav1.ObjectMeta{Name: foundPool, Namespace: run.Namespace},
-		}
-		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-		assert.Equal(collect, &zfspool.Status{
-			State:  "Online",
-			Reason: "",
-		}, pool.Status)
-	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
-
-	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
-		ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
-		Spec: &zfspool.Spec{
-			Name: notFoundPool,
-			SSH: &zfspool.SSHSpec{
-				User:    sshUser,
-				Address: sshAddr,
-				PrivateKey: corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: sshSecretName,
-					},
-					Key: sshPrivateKeySelector,
-				},
-			},
-		},
-	}))
-	require.EventuallyWithTf(t, func(collect *assert.CollectT) {
-		pool := zfspool.Pool{
-			ObjectMeta: metav1.ObjectMeta{Name: notFoundPool, Namespace: run.Namespace},
-		}
-		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-		assert.Equal(collect, &zfspool.Status{
-			State:  "Error",
-			Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, notFoundPool),
-		}, pool.Status)
-	}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
-}
-
-func TestPoolWithSSHOverWireGuard(t *testing.T) {
-	t.Parallel()
 	const somePoolName = "somepool"
-	const (
-		wireguardSecretKeyPeerPublicKey = "peer-public-key"
-		wireguardSecretKeyPresharedKey  = "preshared-key"
-		wireguardSecretKeyPrivateKey    = "private-key"
-	)
 	for _, tc := range []struct {
-		description           string
-		execResults           map[string]ssh.TestExecResult
-		mutateWireGuardSecret func(validSecretData map[string][]byte)
-		expectState           string
-		expectReason          string
+		description  string
+		execResults  map[string]ssh.TestExecResult
+		expectStatus *zfspool.Status
 	}{
 		{
 			description: "happy path",
@@ -158,8 +53,10 @@ config:
 					ExitCode: 0,
 				},
 			},
-			expectState:  "Online",
-			expectReason: "",
+			expectStatus: &zfspool.Status{
+				State:  "Online",
+				Reason: "",
+			},
 		},
 		{
 			description: "pool not found",
@@ -169,8 +66,106 @@ config:
 					ExitCode: 1,
 				},
 			},
-			expectState:  "Error",
-			expectReason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, somePoolName),
+			expectStatus: &zfspool.Status{
+				State:  "Error",
+				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, somePoolName),
+			},
+		},
+	} {
+		t.Run(tc.description, func(t *testing.T) {
+			t.Parallel()
+			run := RunTest(t)
+			sshUser, sshPrivateKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{ExecResults: tc.execResults})
+			const (
+				sshSecretName         = "ssh"
+				sshPrivateKeySelector = "private-key"
+			)
+			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: sshSecretName, Namespace: run.Namespace},
+				StringData: map[string]string{
+					sshPrivateKeySelector: sshPrivateKey,
+				},
+			}))
+			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+				ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
+				Spec: &zfspool.Spec{
+					Name: somePoolName,
+					SSH: &zfspool.SSHSpec{
+						User:    sshUser,
+						Address: sshAddr,
+						PrivateKey: corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: sshSecretName,
+							},
+							Key: sshPrivateKeySelector,
+						},
+					},
+				},
+			}))
+			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
+				pool := zfspool.Pool{
+					ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
+				}
+				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
+				assert.Equal(collect, tc.expectStatus, pool.Status)
+			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
+		})
+	}
+}
+
+func TestPoolWithSSHOverWireGuard(t *testing.T) {
+	t.Parallel()
+	const somePoolName = "somepool"
+	const (
+		wireguardSecretKeyPeerPublicKey = "peer-public-key"
+		wireguardSecretKeyPresharedKey  = "preshared-key"
+		wireguardSecretKeyPrivateKey    = "private-key"
+	)
+	for _, tc := range []struct {
+		description           string
+		execResults           map[string]ssh.TestExecResult
+		mutateWireGuardSecret func(validSecretData map[string][]byte)
+		expectStatus          *zfspool.Status
+	}{
+		{
+			description: "happy path",
+			execResults: map[string]ssh.TestExecResult{
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+					Stdout: fmt.Appendf(nil, `
+  pool: %[1]s
+ state: ONLINE
+config:
+
+        NAME                        STATE     READ WRITE CKSUM
+        %[1]s                       ONLINE       0     0     0
+          raidz2-0                  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+            wwn-0x0000000000000000  ONLINE       0     0     0
+
+ errors: No known data errors
+`, somePoolName),
+					ExitCode: 0,
+				},
+			},
+			expectStatus: &zfspool.Status{
+				State:  "Online",
+				Reason: "",
+			},
+		},
+		{
+			description: "pool not found",
+			execResults: map[string]ssh.TestExecResult{
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+					Stdout:   fmt.Appendf(nil, "cannot open '%[1]s': no such pool\n", somePoolName),
+					ExitCode: 1,
+				},
+			},
+			expectStatus: &zfspool.Status{
+				State:  "Error",
+				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': cannot open '%[1]s': no such pool: Process exited with status 1`, somePoolName),
+			},
 		},
 		{
 			description: "invalid wireguard configuration",
@@ -201,8 +196,10 @@ config:
 					ExitCode: 0,
 				},
 			},
-			expectState:  "Error",
-			expectReason: `dial SSH server %s: context deadline exceeded`,
+			expectStatus: &zfspool.Status{
+				State:  "Error",
+				Reason: `dial SSH server %s: context deadline exceeded`,
+			},
 		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
@@ -265,19 +262,15 @@ config:
 					},
 				},
 			}))
-			expectReason := tc.expectReason
-			if strings.ContainsRune(expectReason, '%') {
-				expectReason = fmt.Sprintf(expectReason, servers.SSH.Address.String())
+			if strings.ContainsRune(tc.expectStatus.Reason, '%') {
+				tc.expectStatus.Reason = fmt.Sprintf(tc.expectStatus.Reason, servers.SSH.Address.String())
 			}
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				pool := zfspool.Pool{
 					ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
 				}
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
-				assert.Equal(collect, &zfspool.Status{
-					State:  tc.expectState,
-					Reason: expectReason,
-				}, pool.Status)
+				assert.Equal(collect, tc.expectStatus, pool.Status)
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 		})
 	}
