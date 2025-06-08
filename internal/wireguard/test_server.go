@@ -13,7 +13,8 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-func StartTestServer(tb testing.TB, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key) (*netstack.Net, netip.AddrPort) {
+// StartTest is like [Start] but always listens to a port and runs test cleanup
+func StartTest(tb testing.TB, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key) (*netstack.Net, netip.AddrPort) {
 	tb.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	tb.Cleanup(cancel)
@@ -21,7 +22,7 @@ func StartTestServer(tb testing.TB, addr netip.Addr, presharedKey, privateKey, p
 	require.NoError(tb, err)
 	listenAddr := conn.LocalAddr().(*net.UDPAddr).AddrPort()
 	require.NoError(tb, conn.Close())
-	serverNet, err := Connect(ctx, Config{
+	serverNet, err := Start(ctx, Config{
 		LocalAddress:  addr,
 		LogHandler:    testlog.NewLogHandler(tb, slog.LevelInfo),
 		PresharedKey:  presharedKey[:],

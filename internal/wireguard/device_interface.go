@@ -37,7 +37,7 @@ func newInterface(logger *slog.Logger, localAddress netip.Addr, dnsAddresses []n
 	}
 }
 
-// Starts and runs the interface until the context is canceled.
+// Start starts and runs the interface until the context is canceled.
 // Use [Wait] to view any errors encountered while running.
 func (i *DeviceInterface) Start(ctx context.Context) (*wgdevice.Device, *netstack.Net, error) {
 	tunDevice, tunNet, err := netstack.CreateNetTUN([]netip.Addr{i.localAddress}, i.dnsAddresses, wgdevice.DefaultMTU)

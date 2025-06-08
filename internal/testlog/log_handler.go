@@ -1,3 +1,5 @@
+// Package testlog creates test-based log writers and handlers,
+// where output goes to the testing.T.Log() of the current test or benchmark.
 package testlog
 
 import (
@@ -13,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// NewLogHandler returns an [slog.Handler] that sends output at the given log level to the current test's log.
+// Makes a few simplifications for easy debugging with the output.
 func NewLogHandler(tb testing.TB, level slog.Level) *slog.TextHandler {
 	var writer io.Writer = NewWriter(tb)
 	writer = &unrollQuotedMultiLineStringsWriter{writer: writer}

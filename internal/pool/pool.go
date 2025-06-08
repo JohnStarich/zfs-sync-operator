@@ -3,8 +3,10 @@ package pool
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
@@ -14,7 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	ctrlruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -27,7 +29,7 @@ const (
 )
 
 // MustAddToScheme adds the Pool scheme to s
-func MustAddToScheme(s *runtime.Scheme) {
+func MustAddToScheme(s *ctrlruntime.Scheme) {
 	schemeBuilder := &scheme.Builder{
 		GroupVersion: schema.GroupVersion{
 			Group:   group,
@@ -57,8 +59,8 @@ type Pool struct {
 	Status *Status `json:"status,omitempty"`
 }
 
-// DeepCopyObject implements [runtime.Object]
-func (p *Pool) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(p) }
+// DeepCopyObject implements [ctrlruntime.Object]
+func (p *Pool) DeepCopyObject() ctrlruntime.Object { return baddeepcopy.DeepCopy(p) }
 
 // Spec defines the connection details for a [Pool], including WireGuard and SSH
 type Spec struct {
@@ -67,12 +69,14 @@ type Spec struct {
 	WireGuard *WireGuardSpec `json:"wireguard,omitempty"`
 }
 
+// SSHSpec defines the SSH connection details for a [Pool]
 type SSHSpec struct {
 	User       string                   `json:"user"`
 	Address    netip.AddrPort           `json:"address"`
 	PrivateKey corev1.SecretKeySelector `json:"privateKey"`
 }
 
+// WireGuardSpec defines the WireGuard connection details for a [Pool]
 type WireGuardSpec struct {
 	DNSAddresses  []netip.Addr              `json:"dnsAddresses,omitempty"`
 	LocalAddress  netip.Addr                `json:"localAddress"`
@@ -97,11 +101,11 @@ type PoolList struct {
 	Items           []Pool `json:"items"`
 }
 
-// DeepCopyObject implements [runtime.Object]
-func (l *PoolList) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(l) }
+// DeepCopyObject implements [ctrlruntime.Object]
+func (l *PoolList) DeepCopyObject() ctrlruntime.Object { return baddeepcopy.DeepCopy(l) }
 
 // WithSession starts an SSH session (optionally over WireGuard) using p's Spec, runs do with the session, then tears everything down
-func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func(*ssh.Session) error) error {
+func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func(*ssh.Session) error) (returnedErr error) {
 	logger := log.FromContext(ctx)
 
 	if p.Spec == nil || p.Spec.SSH == nil {
@@ -112,7 +116,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer tryNonCriticalCleanup(ctx, currentLine(), conn.Close)
 	logger.Info("SSH TCP connection established")
 
 	sshPrivateKey, err := getSecretKey(ctx, client, p.Namespace, p.Spec.SSH.PrivateKey)
@@ -133,14 +137,37 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 	if err != nil {
 		return err
 	}
-	defer sshConn.Close()
+	defer tryCleanup(currentLine(), &returnedErr, sshConn.Close)
 	sshClient := ssh.NewClient(sshConn, channels, requests)
 	session, err := sshClient.NewSession()
 	if err != nil {
 		return err
 	}
-	defer session.Close()
+	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
 	return do(session)
+}
+
+func currentLine() string {
+	_, file, line, ok := runtime.Caller(1)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", file, line)
+}
+
+func tryCleanup(message string, storeErr *error, do func() error) {
+	err := do()
+	if err != nil && storeErr != nil && *storeErr == nil {
+		*storeErr = errors.Wrapf(err, "try cleanup: %s", message)
+	}
+}
+
+func tryNonCriticalCleanup(ctx context.Context, message string, do func() error) {
+	logger := log.FromContext(ctx)
+	err := do()
+	if err != nil {
+		logger.Info("Non-critical clean up failed:", message, err)
+	}
 }
 
 func getSecretKey(ctx context.Context, client ctrlclient.Client, currentNamespace string, selector corev1.SecretKeySelector) ([]byte, error) {
@@ -189,7 +216,7 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 			}
 		}
 
-		wireGuardNet, err := wireguard.Connect(ctx, wireguard.Config{
+		wireGuardNet, err := wireguard.Start(ctx, wireguard.Config{
 			DNSAddresses:  wireGuardSpec.DNSAddresses,
 			LocalAddress:  wireGuardSpec.LocalAddress,
 			LogHandler:    logr.ToSlogHandler(logger),

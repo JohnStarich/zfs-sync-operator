@@ -82,6 +82,7 @@ type Operator struct {
 	startErr chan error
 }
 
+// Config contains configuration to set up an [Operator]
 type Config struct {
 	LogHandler        slog.Handler
 	MetricsPort       string

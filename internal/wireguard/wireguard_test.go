@@ -42,7 +42,7 @@ func TestConnectToHTTPServer(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
 		t.Parallel()
 		httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, clientPrivateKey, serverPublicKey, serverAddr)
-		resp, err := httpClient.Get(serverHTTPURL.String())
+		resp, err := httpGet(httpClient, serverHTTPURL.String())
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -59,26 +59,30 @@ func TestConnectToHTTPServer(t *testing.T) {
 		bustedPrivateKey[4] = 'o'
 		bustedPrivateWireGuardKey := wgtypes.Key(bustedPrivateKey)
 		httpClient := makeHTTPClient(t, netip.MustParseAddr(clientVPNAddr), presharedKey, bustedPrivateWireGuardKey, serverPublicKey, serverAddr)
-		_, err := httpClient.Get(serverHTTPURL.String())
+		_, err := httpGet(httpClient, serverHTTPURL.String())
 		require.EqualError(t, err, `Get "http://192.168.4.29": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`)
 	})
 }
 
 func startHTTPServer(t *testing.T, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key, message string) netip.AddrPort {
-	serverNet, addrPort := StartTestServer(t, addr, presharedKey, privateKey, peerPublicKey)
+	serverNet, addrPort := StartTest(t, addr, presharedKey, privateKey, peerPublicKey)
 	listener, err := serverNet.ListenTCP(&net.TCPAddr{Port: 80})
 	require.NoError(t, err)
 
 	server := http.Server{
+		ReadHeaderTimeout: 1 * time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.Logf("Request received: %s - %s - %s\n", r.RemoteAddr, r.URL.String(), r.UserAgent())
-			io.WriteString(w, message)
+			_, err := io.WriteString(w, message)
+			require.NoError(t, err)
 		}),
 	}
 	t.Cleanup(func() {
 		require.NoError(t, server.Close())
 	})
-	go server.Serve(listener)
+	go func() {
+		_ = server.Serve(listener)
+	}()
 	return addrPort
 }
 
@@ -86,7 +90,7 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	clientNet, err := Connect(ctx, Config{
+	clientNet, err := Start(ctx, Config{
 		LocalAddress:  addr,
 		LogHandler:    testlog.NewLogHandler(t, slog.LevelDebug),
 		PresharedKey:  presharedKey[:],
@@ -101,4 +105,12 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 		},
 		Timeout: 5 * time.Second, // arbitrarily large timeout for a test
 	}
+}
+
+func httpGet(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
 }

@@ -15,6 +15,5 @@ linters:
     - nolintlint
     - paralleltest
     - revive
-    - testifylint
     - unconvert
     - unparam

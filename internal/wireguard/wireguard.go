@@ -1,3 +1,5 @@
+// Package wireguard starts WireGuard peers natively in Go.
+// Does not require any additional Linux capabilities.
 package wireguard
 
 import (
@@ -14,6 +16,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+// Config contains data to configure a WireGuard connection
 type Config struct {
 	DNSAddresses  []netip.Addr // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
 	ListenPort    int          // Optional: The port number to listen for WireGuard connections.
@@ -25,7 +28,9 @@ type Config struct {
 	PrivateKey    []byte
 }
 
-func Connect(ctx context.Context, config Config) (*netstack.Net, error) {
+// Start starts a new WireGuard interface and configures it with details from a [Config].
+// This can be used to start a peer listening on a port, or only connect to a peer address.
+func Start(ctx context.Context, config Config) (*netstack.Net, error) {
 	var listenPort *int
 	if config.ListenPort != 0 {
 		listenPort = toPointer(config.ListenPort)
@@ -88,7 +93,7 @@ func writeConfig(w io.Writer, cfg wgtypes.Config) {
 	writeIf(w, cfg.FirewallMark != nil, "fwmark=%d\n", valueOrZeroValue(cfg.FirewallMark))
 	writeIf(w, cfg.ReplacePeers, "replace_peers=true\n")
 	for _, p := range cfg.Peers {
-		fmt.Fprintf(w, "public_key=%s\n", keyToHex(p.PublicKey))
+		mustWritef(w, "public_key=%s\n", keyToHex(p.PublicKey))
 		writeIf(w, p.Remove, "remove=true\n")
 		writeIf(w, p.UpdateOnly, "update_only=true\n")
 		writeIf(w, p.PresharedKey != nil, "preshared_key=%s\n", keyToHex(valueOrZeroValue(p.PresharedKey)))
@@ -96,14 +101,21 @@ func writeConfig(w io.Writer, cfg wgtypes.Config) {
 		writeIf(w, p.PersistentKeepaliveInterval != nil, "persistent_keepalive_interval=%d\n", int(valueOrZeroValue(p.PersistentKeepaliveInterval).Seconds()))
 		writeIf(w, p.ReplaceAllowedIPs, "replace_allowed_ips=true\n")
 		for _, ip := range p.AllowedIPs {
-			fmt.Fprintf(w, "allowed_ip=%s\n", ip.String())
+			mustWritef(w, "allowed_ip=%s\n", ip.String())
 		}
 	}
 }
 
 func writeIf(w io.Writer, cond bool, format string, args ...any) {
 	if cond {
-		fmt.Fprintf(w, format, args...)
+		mustWritef(w, format, args...)
+	}
+}
+
+func mustWritef(w io.Writer, format string, args ...any) {
+	_, err := fmt.Fprintf(w, format, args...)
+	if err != nil {
+		panic(err)
 	}
 }
 

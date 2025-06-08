@@ -335,7 +335,7 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecRes
 
 	remoteWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.2")
 	localWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.3")
-	wireguardNet, wireguardAddr := wireguard.StartTestServer(tb, remoteWireGuardInterfaceAddr, presharedKey, serverPrivateKey, clientPublicKey)
+	wireguardNet, wireguardAddr := wireguard.StartTest(tb, remoteWireGuardInterfaceAddr, presharedKey, serverPrivateKey, clientPublicKey)
 	sshListener, err := wireguardNet.ListenTCPAddrPort(netip.AddrPortFrom(remoteWireGuardInterfaceAddr, 0))
 	require.NoError(tb, err)
 	tb.Cleanup(func() {

@@ -1,3 +1,4 @@
+// Package ssh stands up and manages the lifecycle of SSH servers, for testing purposes.
 package ssh
 
 import (
@@ -20,11 +21,13 @@ import (
 
 const rsaKeyBits = 2048
 
+// TestConfig configures a test SSH server
 type TestConfig struct {
 	Listener    net.Listener // Defaults to a TCP listener on an unused port.
 	ExecResults map[string]TestExecResult
 }
 
+// TestExecResult describes the behavior of a command executed via SSH
 type TestExecResult struct {
 	ExpectStdin []byte
 	Stdout      []byte
@@ -43,10 +46,10 @@ func TestServer(tb testing.TB, config TestConfig) (user, privateKey string, addr
 	}))
 
 	if config.Listener == nil {
-		listener, err := net.Listen("tcp", "0.0.0.0:0")
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
-			require.NoError(tb, listener.Close())
+			mustClose(tb, listener)
 		})
 		config.Listener = listener
 	}
@@ -94,7 +97,7 @@ func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKe
 			return
 		}
 		go func() {
-			defer netConn.Close()
+			defer tryClose(tb, netConn)
 			handleConn(tb, netConn, &serverConfig, config)
 		}()
 	}
@@ -143,16 +146,16 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig,
 				tb.Logf("Handling SSH exec request: %q", command.Command)
 
 				wg.Add(1)
-				go func(req *ssh.Request) {
+				go func() {
 					defer func() {
-						channel.Close()
+						tryClose(tb, channel)
 						wg.Done()
 					}()
 					exitCode := handleExecRequest(tb, command.Command, channel, channel, channel.Stderr(), config)
-					exitStatus := exitStatusRequest{Status: uint32(exitCode)}
+					exitStatus := exitStatusRequest{Status: safelyConvertExitCode(exitCode)}
 					_, err := channel.SendRequest(exitStatusRequestName, false, ssh.Marshal(exitStatus))
 					require.NoError(tb, err)
-				}(req)
+				}()
 				if err := req.Reply(true, nil); err != nil && !errors.Is(err, io.EOF) {
 					require.NoError(tb, err)
 				}
@@ -164,9 +167,7 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig,
 
 func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, stderr io.Writer, config TestConfig) int {
 	result, hasResult := config.ExecResults[command]
-	if !hasResult {
-		tb.Fatal("Unexpected exec command:", command)
-	}
+	require.Truef(tb, hasResult, "Unexpected exec command: %s", command)
 	if len(result.ExpectStdin) > 0 {
 		stdinBytes, err := io.ReadAll(stdin)
 		require.NoError(tb, err)
@@ -177,4 +178,24 @@ func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, s
 	_, err = stderr.Write(result.Stderr)
 	require.NoError(tb, err)
 	return result.ExitCode
+}
+
+func safelyConvertExitCode(i int) uint32 {
+	const maxExitCode = 256
+	if i >= 0 && i < maxExitCode {
+		return uint32(i)
+	}
+	return 1
+}
+
+func mustClose(tb testing.TB, closer io.Closer) {
+	require.NoError(tb, closer.Close())
+}
+
+func tryClose(tb testing.TB, closer io.Closer) {
+	tb.Helper()
+	err := closer.Close()
+	if err != nil {
+		tb.Log("Non-critical clean up failed:", err)
+	}
 }
