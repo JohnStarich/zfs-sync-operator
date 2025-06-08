@@ -111,11 +111,12 @@ func stateFieldFromZpoolStatus(status []byte) string {
 }
 
 func stateFromStateField(state string) string {
-	switch state {
-	case "ONLINE":
-		return "Online"
+	// A pool's health status is described by one of three states: online, degraded, or faulted.
+	// - https://openzfs.github.io/openzfs-docs/man/v0.8/8/zpool.8.html#Device_Failure_and_Recovery
+	switch strings.ToUpper(state) { // should already be in uppercase, but uppercasing defensively
+	case "ONLINE", "DEGRADED", "FAULTED":
+		return strings.ToUpper(state[0:1]) + strings.ToLower(state[1:])
 	default:
-		// TODO handle all known zpool states
 		return "Unknown"
 	}
 }
