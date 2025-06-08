@@ -53,7 +53,8 @@ func TestConnectToHTTPServer(t *testing.T) {
 		t.Parallel()
 		// Then verify an almost identical client with a busted key fails to connect.
 		// This ensures we didn't just happen to bind to all interfaces and communicate outside WireGuard.
-		bustedPrivateKey := clientPrivateKey[:]
+		bustedPrivateKey := make([]byte, len(clientPrivateKey))
+		copy(bustedPrivateKey, clientPrivateKey[:])
 		bustedPrivateKey[2] = 'f'
 		bustedPrivateKey[3] = 'o'
 		bustedPrivateKey[4] = 'o'
