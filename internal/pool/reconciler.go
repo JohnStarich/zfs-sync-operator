@@ -92,7 +92,7 @@ func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (resourceVersion,
 
 // stateFieldFromZpoolStatus parses the plain text output of 'zpool status <pool>'.
 //
-// TODO Once JSON support is accessible to test against, switch to parsing it.
+// TODO Parse output with JSON: https://github.com/JohnStarich/zfs-sync-operator/issues/15
 func stateFieldFromZpoolStatus(status []byte) string {
 	status = bytes.TrimSpace(status) // remove leading blank lines, if any
 	scanner := bufio.NewScanner(bytes.NewReader(status))
