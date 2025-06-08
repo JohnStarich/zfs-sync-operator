@@ -112,7 +112,3 @@ func stateFromStateField(state string) string {
 		return "Unknown"
 	}
 }
-
-func toPointer[Value any](value Value) *Value {
-	return &value
-}

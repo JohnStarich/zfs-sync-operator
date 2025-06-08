@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -97,7 +98,7 @@ func makeHTTPClient(t *testing.T, addr netip.Addr, presharedKey, privateKey, pee
 		PresharedKey:    presharedKey[:],
 		LocalPrivateKey: privateKey[:],
 		PeerPublicKey:   peerPublicKey[:],
-		PeerAddress:     toPointer(peerAddr.String()),
+		PeerAddress:     pointer.Of(peerAddr.String()),
 	})
 	require.NoError(t, err)
 	return &http.Client{

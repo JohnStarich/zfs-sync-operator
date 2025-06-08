@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -33,11 +34,11 @@ type Config struct {
 func Start(ctx context.Context, config Config) (*netstack.Net, error) {
 	var listenPort *int
 	if config.ListenPort != 0 {
-		listenPort = toPointer(config.ListenPort)
+		listenPort = pointer.Of(config.ListenPort)
 	}
 	var presharedKey *wgtypes.Key
 	if len(config.PresharedKey) > 0 {
-		presharedKey = toPointer(wgtypes.Key(config.PresharedKey))
+		presharedKey = pointer.Of(wgtypes.Key(config.PresharedKey))
 	}
 	var address *net.UDPAddr
 	if config.PeerAddress != nil {
@@ -48,7 +49,7 @@ func Start(ctx context.Context, config Config) (*netstack.Net, error) {
 		address = udpAddr
 	}
 	wgConfig := wgtypes.Config{
-		PrivateKey:   toPointer(wgtypes.Key(config.LocalPrivateKey)),
+		PrivateKey:   pointer.Of(wgtypes.Key(config.LocalPrivateKey)),
 		ListenPort:   listenPort,
 		ReplacePeers: true,
 		Peers: []wgtypes.PeerConfig{
@@ -121,10 +122,6 @@ func mustWritef(w io.Writer, format string, args ...any) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func toPointer[Value any](value Value) *Value {
-	return &value
 }
 
 func valueOrZeroValue[Value any](pointer *Value) Value {
