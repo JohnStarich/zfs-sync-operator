@@ -46,15 +46,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (state, reason string, returnedErr error) {
-	/*
-		var source, destination pool.Pool
-		if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Source.Name}, &source); err != nil {
-			return "", "", errors.WithMessage(err, "get source Pool")
-		}
-		if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Destination.Name}, &destination); err != nil {
-			return "", "", errors.WithMessage(err, "get destination Pool")
-		}
-	*/
+func (r *Reconciler) reconcile(context.Context, Backup) (state, reason string, returnedErr error) {
 	return "Ready", "", nil
 }
