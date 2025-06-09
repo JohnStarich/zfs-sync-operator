@@ -6,6 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/go-logr/logr v1.4.2
+	github.com/gofrs/flock v0.12.1
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/crypto v0.38.0
