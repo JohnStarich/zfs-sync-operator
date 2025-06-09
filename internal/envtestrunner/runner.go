@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/johnstarich/zfs-sync-operator/config"
 	"github.com/pkg/errors"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -102,6 +103,19 @@ func (r *Runner) setUp(ctx context.Context, out io.Writer) (returnedErr error) {
 		return err
 	}
 	envTestPath := filepath.Join(strings.TrimSpace(goPathOutput), "bin", "setup-envtest")
+
+	// Obtain exclusive lock during envtest setup, to avoid mangled
+	// install directories from competing runners in parallel package test runs.
+	envtestUseLock := flock.New(envTestPath + ".envtestrunner-lock")
+	if lockErr := envtestUseLock.Lock(); lockErr != nil {
+		panic(lockErr)
+	}
+	defer func() {
+		if closeErr := envtestUseLock.Close(); closeErr != nil && returnedErr == nil {
+			returnedErr = closeErr
+		}
+	}()
+
 	_, err = exec.LookPath(envTestPath)
 	if err != nil {
 		// TODO In Go 1.24+, use 'go get -tool' to lock in the version inside go.mod
@@ -111,6 +125,7 @@ func (r *Runner) setUp(ctx context.Context, out io.Writer) (returnedErr error) {
 			return err
 		}
 	}
+
 	const kubeVersion = "1.31"
 	kubebuilderAssetsPath, err := runCommand(ctx, out, envTestPath, "use", "-p", "path", kubeVersion)
 	if err != nil {

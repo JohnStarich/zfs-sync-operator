@@ -11,6 +11,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
+	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
@@ -23,30 +24,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-const (
-	group      = name.Operator + ".johnstarich.com"
-	apiVersion = "v1alpha1"
-)
-
 // MustAddToScheme adds the Pool scheme to s
 func MustAddToScheme(s *ctrlruntime.Scheme) {
 	schemeBuilder := &scheme.Builder{
 		GroupVersion: schema.GroupVersion{
-			Group:   group,
-			Version: apiVersion,
+			Group:   name.Operator + ".johnstarich.com",
+			Version: "v1alpha1",
 		},
 	}
 	schemeBuilder.Register(&Pool{}, &PoolList{})
 	err := schemeBuilder.AddToScheme(s)
 	if err != nil {
 		panic(err)
-	}
-}
-
-func typeMeta() metav1.TypeMeta {
-	return metav1.TypeMeta{
-		Kind:       "Pool",
-		APIVersion: group + "/" + apiVersion,
 	}
 }
 
@@ -143,7 +132,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 		hostKeyCallback = ssh.HostKeyCallback(func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			// Save host key for validation in next reconcile
 			poolWithHostKey := p
-			poolWithHostKey.Spec.SSH.HostKey = toPointer(key.Marshal())
+			poolWithHostKey.Spec.SSH.HostKey = pointer.Of(key.Marshal())
 			err := client.Update(ctx, &poolWithHostKey)
 			resourceVersion = poolWithHostKey.ResourceVersion
 			return err

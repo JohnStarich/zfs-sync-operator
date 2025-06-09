@@ -1,4 +1,4 @@
-package main
+package pool_test
 
 import (
 	"fmt"
@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
+	"github.com/johnstarich/zfs-sync-operator/internal/operator"
+	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
@@ -17,6 +20,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var TestEnv *envtestrunner.Runner //nolint:gochecknoglobals // The test environment is very expensive to set up, so this performance optimization is required for fast test execution.
+
+func TestMain(m *testing.M) {
+	operator.RunTestMain(m, &TestEnv)
+}
 
 const (
 	maxWaitForPool = 10 * time.Second
@@ -87,7 +96,7 @@ config:
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			run := RunTest(t)
+			run := operator.RunTest(t, TestEnv)
 			sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(t, ssh.TestConfig{ExecResults: tc.execResults})
 			const (
 				sshSecretName         = "ssh"
@@ -125,7 +134,7 @@ config:
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 				assert.Equal(collect, tc.expectStatus, pool.Status)
 				expectSpec := makeSpec()
-				expectSpec.SSH.HostKey = toPointer([]byte(sshServerPublicKey))
+				expectSpec.SSH.HostKey = pointer.Of([]byte(sshServerPublicKey))
 				assert.Equal(collect, expectSpec, pool.Spec)
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 		})
@@ -241,7 +250,7 @@ config:
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
-			run := RunTest(t)
+			run := operator.RunTest(t, TestEnv)
 			servers := startSSHOverWireGuard(t, tc.execResults)
 			const (
 				sshSecretName         = "ssh"
@@ -313,7 +322,7 @@ config:
 				assert.Equal(collect, tc.expectStatus, pool.Status)
 				if tc.expectSpecHostKey {
 					expectSpec := makeSpec()
-					expectSpec.SSH.HostKey = toPointer([]byte(servers.SSH.ServerPublicKey))
+					expectSpec.SSH.HostKey = pointer.Of([]byte(servers.SSH.ServerPublicKey))
 					assert.Equal(t, expectSpec, pool.Spec)
 				}
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)

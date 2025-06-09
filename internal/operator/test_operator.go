@@ -1,7 +1,8 @@
-package main
+package operator
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -13,22 +14,35 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var TestEnv *envtestrunner.Runner //nolint:gochecknoglobals // The test environment is very expensive to set up, so this performance optimization is required for fast test execution.
-
-func TestMain(m *testing.M) {
+// RunTestMain orchestrates a package's tests to run with an envtestrunner. It controls the full lifecycle of the package.
+//
+// Example:
+//
+//	var TestEnv *envtestrunner.Runner
+//
+//	func TestMain(m *testing.M) {
+//	    operator.RunTestMain(m, &TestEnv)
+//	}
+//
+//	func TestFoo(t *testing.T) {
+//		t.Parallel()
+//		run := operator.RunTest(t, TestEnv)
+//		...
+//	}
+func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 	flag.Parse()
 	if testing.Short() {
 		return
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	TestEnv = envtestrunner.New(ctx, m.Run, mustNewScheme())
-	if err := TestEnv.Run(os.Stdout); err != nil {
+	testEnv := envtestrunner.New(ctx, m.Run, mustNewScheme())
+	*storeTestEnv = testEnv
+	if err := testEnv.Run(os.Stdout); err != nil {
 		exitCode := 1
 		var exitCoder interface{ ExitCode() int }
 		if errors.As(err, &exitCoder) && exitCoder.ExitCode() != 0 {
@@ -39,13 +53,15 @@ func TestMain(m *testing.M) {
 	}
 }
 
+// TestRunConfig contains data necessary for running tests. Returned from [RunTest].
 type TestRunConfig struct {
 	Namespace string
 }
 
-func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
+// RunTest sets up an [Operator] and a namespace to create resources in. Uses the existing global [envtestrunner.Runner] set up from a [RunTestMain].
+func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestRunConfig) {
 	tb.Helper()
-	ctx, cancel := context.WithCancel(TestEnv.Context())
+	ctx, cancel := context.WithCancel(testEnv.Context())
 	shutdownCtx, shutdownComplete := context.WithCancel(context.Background())
 	tb.Cleanup(func() {
 		cancel()
@@ -62,7 +78,7 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 			GenerateName: namespaceName(tb),
 		},
 	}
-	err := TestEnv.Client().Create(ctx, namespaceObj)
+	err := testEnv.Client().Create(ctx, namespaceObj)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -72,7 +88,7 @@ func RunTest(tb testing.TB) (returnedConfig TestRunConfig) {
 	if testing.Verbose() {
 		level = slog.LevelDebug
 	}
-	operator, err := New(ctx, TestEnv.RESTConfig(), Config{
+	operator, err := New(ctx, testEnv.RESTConfig(), Config{
 		LogHandler:        testlog.NewLogHandler(tb, level),
 		MetricsPort:       "0",
 		Namespace:         namespace,
