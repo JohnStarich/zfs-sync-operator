@@ -32,5 +32,5 @@ func shouldQuote(r rune) bool {
 	if r > unicode.MaxASCII {
 		return true
 	}
-	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '/'
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '/' && r != '-'
 }

@@ -24,6 +24,11 @@ func TestSafelyFormatCommand(t *testing.T) {
 			expect:      `name\ with\ spaces/slashes`,
 		},
 		{
+			description: "skip hypens and slashes",
+			args:        []string{"hyphen-and/slash"},
+			expect:      `hyphen-and/slash`,
+		},
+		{
 			description: "multiple args",
 			args:        []string{"arg with space", "and/slashes"},
 			expect:      `arg\ with\ space and/slashes`,
