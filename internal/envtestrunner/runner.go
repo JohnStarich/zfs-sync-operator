@@ -107,6 +107,9 @@ func (r *Runner) setUp(ctx context.Context, out io.Writer) (returnedErr error) {
 	// Obtain exclusive lock during envtest setup, to avoid mangled
 	// install directories from competing runners in parallel package test runs.
 	envtestUseLock := flock.New(envTestPath + ".envtestrunner-lock")
+	if lockErr := envtestUseLock.Lock(); lockErr != nil {
+		panic(lockErr)
+	}
 	defer func() {
 		if closeErr := envtestUseLock.Close(); closeErr != nil && returnedErr == nil {
 			returnedErr = closeErr
