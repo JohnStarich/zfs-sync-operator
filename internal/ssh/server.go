@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,7 +37,7 @@ type TestExecResult struct {
 }
 
 // TestServer starts an SSH server and returns the user and private key to use
-func TestServer(tb testing.TB, config TestConfig) (user, clientPrivateKey, serverPublicKey string, address netip.AddrPort) {
+func TestServer(tb testing.TB, config TestConfig) (user, clientPrivateKey string, serverPublicKey *[]byte, address netip.AddrPort) {
 	tb.Helper()
 	clientRSAPrivateKey, err := rsa.GenerateKey(rand.Reader, rsaKeyBits)
 	require.NoError(tb, err)
@@ -53,7 +54,7 @@ func TestServer(tb testing.TB, config TestConfig) (user, clientPrivateKey, serve
 	})
 	serverPrivateKey, err := ssh.ParsePrivateKey(serverPrivateKeyBytes)
 	require.NoError(tb, err)
-	serverPublicKey = string(serverPrivateKey.PublicKey().Marshal())
+	serverPublicKey = pointer.Of(serverPrivateKey.PublicKey().Marshal())
 
 	if config.Listener == nil {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")

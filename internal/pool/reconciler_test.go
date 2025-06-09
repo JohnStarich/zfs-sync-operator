@@ -9,7 +9,6 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
-	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
@@ -134,7 +133,7 @@ config:
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 				assert.Equal(collect, tc.expectStatus, pool.Status)
 				expectSpec := makeSpec()
-				expectSpec.SSH.HostKey = pointer.Of([]byte(sshServerPublicKey))
+				expectSpec.SSH.HostKey = sshServerPublicKey
 				assert.Equal(collect, expectSpec, pool.Spec)
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
 		})
@@ -322,7 +321,7 @@ config:
 				assert.Equal(collect, tc.expectStatus, pool.Status)
 				if tc.expectSpecHostKey {
 					expectSpec := makeSpec()
-					expectSpec.SSH.HostKey = pointer.Of([]byte(servers.SSH.ServerPublicKey))
+					expectSpec.SSH.HostKey = servers.SSH.ServerPublicKey
 					assert.Equal(t, expectSpec, pool.Spec)
 				}
 			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
@@ -338,7 +337,7 @@ type TestSSHOverWireGuard struct {
 type TestSSH struct {
 	Address          netip.AddrPort
 	ClientPrivateKey string
-	ServerPublicKey  string
+	ServerPublicKey  *[]byte
 	User             string
 }
 
