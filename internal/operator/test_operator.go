@@ -116,6 +116,14 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 
 func namespaceName(tb testing.TB) string {
 	name := tb.Name()
+	const (
+		maxNamespaceLength = 63
+		randomSuffixLength = 6
+		maxLength          = maxNamespaceLength - randomSuffixLength
+	)
+	if len(name) > maxLength {
+		name = name[:maxLength]
+	}
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, "/", "-")
 	name = strings.ReplaceAll(name, "#", "-")

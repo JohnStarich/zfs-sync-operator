@@ -27,8 +27,8 @@ func TestMain(m *testing.M) {
 }
 
 const (
-	maxWaitForPool = 10 * time.Second
-	tickForPool    = max(10*time.Millisecond, maxWaitForPool/10)
+	maxWait = 10 * time.Second
+	tick    = max(10*time.Millisecond, maxWait/10)
 )
 
 func TestPoolWithOnlySSH(t *testing.T) {
@@ -135,7 +135,7 @@ config:
 				expectSpec := makeSpec()
 				expectSpec.SSH.HostKey = sshServerPublicKey
 				assert.Equal(collect, expectSpec, pool.Spec)
-			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
+			}, maxWait, tick, "namespace = %s", run.Namespace)
 		})
 	}
 }
@@ -324,7 +324,7 @@ config:
 					expectSpec.SSH.HostKey = servers.SSH.ServerPublicKey
 					assert.Equal(t, expectSpec, pool.Spec)
 				}
-			}, maxWaitForPool, tickForPool, "namespace = %s", run.Namespace)
+			}, maxWait, tick, "namespace = %s", run.Namespace)
 		})
 	}
 }
