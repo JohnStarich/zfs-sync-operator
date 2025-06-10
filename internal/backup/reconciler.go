@@ -2,10 +2,18 @@ package backup
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/pool"
+	"github.com/pkg/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // Reconciler reconciles Backup resources to validate their Pools and associated connections
@@ -13,9 +21,25 @@ type Reconciler struct {
 	client client.Client
 }
 
-// NewReconciler returns a new backup reconciler
-func NewReconciler(client client.Client) *Reconciler {
-	return &Reconciler{client: client}
+// RegisterReconciler registers a Backup reconciler with manager
+func RegisterReconciler(manager manager.Manager) error {
+	ctrl, err := controller.New("backup", manager, controller.Options{
+		Reconciler: &Reconciler{client: manager.GetClient()},
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := ctrl.Watch(source.Kind(
+		manager.GetCache(),
+		&Backup{},
+		&handler.TypedEnqueueRequestForObject[*Backup]{},
+		predicate.TypedGenerationChangedPredicate[*Backup]{},
+	)); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Reconcile implements [reconcile.Reconciler]

@@ -10,8 +10,13 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // Reconciler reconciles Pool resources to validate their Pools and associated connections
@@ -20,12 +25,28 @@ type Reconciler struct {
 	maxSessionWait time.Duration
 }
 
-// NewReconciler returns a new pool reconciler
-func NewReconciler(client ctrlclient.Client, maxSessionWait time.Duration) *Reconciler {
-	return &Reconciler{
-		client:         client,
-		maxSessionWait: maxSessionWait,
+// RegisterReconciler registers a Pool reconciler with manager
+func RegisterReconciler(manager manager.Manager, maxSessionWait time.Duration) error {
+	ctrl, err := controller.New("pool", manager, controller.Options{
+		Reconciler: &Reconciler{
+			client:         manager.GetClient(),
+			maxSessionWait: maxSessionWait,
+		},
+	})
+	if err != nil {
+		return err
 	}
+
+	if err := ctrl.Watch(source.Kind(
+		manager.GetCache(),
+		&Pool{},
+		&handler.TypedEnqueueRequestForObject[*Pool]{},
+		predicate.TypedGenerationChangedPredicate[*Pool]{},
+	)); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Reconcile implements [reconcile.Reconciler]

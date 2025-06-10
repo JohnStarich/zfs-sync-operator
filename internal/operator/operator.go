@@ -21,12 +21,8 @@ import (
 	"k8s.io/client-go/rest"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/config"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // Run starts an [Operator] with the given runtime context, CLI args, and output stream.
@@ -113,37 +109,11 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 		return nil, err
 	}
 
-	{ // Backup
-		ctrl, err := controller.New("backup", mgr, controller.Options{
-			Reconciler: backup.NewReconciler(mgr.GetClient()),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if err := ctrl.Watch(source.Kind(
-			mgr.GetCache(),
-			&backup.Backup{},
-			&handler.TypedEnqueueRequestForObject[*backup.Backup]{},
-			predicate.TypedGenerationChangedPredicate[*backup.Backup]{},
-		)); err != nil {
-			return nil, err
-		}
+	if err := backup.RegisterReconciler(mgr); err != nil {
+		return nil, err
 	}
-	{ // Pool
-		ctrl, err := controller.New("pool", mgr, controller.Options{
-			Reconciler: pool.NewReconciler(mgr.GetClient(), c.maxSessionWait),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if err := ctrl.Watch(source.Kind(
-			mgr.GetCache(),
-			&pool.Pool{},
-			&handler.TypedEnqueueRequestForObject[*pool.Pool]{},
-			predicate.TypedGenerationChangedPredicate[*pool.Pool]{},
-		)); err != nil {
-			return nil, err
-		}
+	if err := pool.RegisterReconciler(mgr, c.maxSessionWait); err != nil {
+		return nil, err
 	}
 
 	operator := &Operator{
