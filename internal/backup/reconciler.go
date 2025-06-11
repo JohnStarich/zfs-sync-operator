@@ -125,8 +125,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (resourceVers
 	}
 	needsUpdate := false
 	for key, needValue := range needLabels {
-		value, hasValue := backup.Labels[key]
-		if !hasValue || value != needValue {
+		if backup.Labels[key] != needValue {
 			backup.Labels[key] = needValue
 			needsUpdate = true
 		}
