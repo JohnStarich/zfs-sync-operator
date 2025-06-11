@@ -136,10 +136,10 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (resourceVers
 		}
 	}
 
-	if source.Status == nil || source.Status.State != "Online" { // TODO use const
+	if source.Status == nil || source.Status.State != pool.Online {
 		return backup.ResourceVersion, "NotReady", fmt.Sprintf("source pool %q is unhealthy", source.Name), nil
 	}
-	if destination.Status == nil || destination.Status.State != "Online" { // TODO use const
+	if destination.Status == nil || destination.Status.State != pool.Online {
 		return backup.ResourceVersion, "NotReady", fmt.Sprintf("destination pool %q is unhealthy", destination.Name), nil
 	}
 	return backup.ResourceVersion, "Ready", "", nil

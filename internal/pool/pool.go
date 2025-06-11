@@ -78,7 +78,7 @@ type WireGuardSpec struct {
 
 // Status holds status information for a [Pool]
 type Status struct {
-	State  string `json:"state"`
+	State  State  `json:"state"`
 	Reason string `json:"reason"`
 }
 

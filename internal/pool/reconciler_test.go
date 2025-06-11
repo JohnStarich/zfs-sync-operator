@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
+	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
@@ -62,7 +63,7 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Online",
+				State:  pool.Online,
 				Reason: "",
 			},
 		},
@@ -88,7 +89,7 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
+				State:  zfspool.Error,
 				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
 			},
 		},
@@ -178,7 +179,7 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Online",
+				State:  pool.Online,
 				Reason: "",
 			},
 			expectSpecHostKey: true,
@@ -227,7 +228,7 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
+				State:  zfspool.Error,
 				Reason: `dial SSH server %s: context deadline exceeded`,
 			},
 			expectSpecHostKey: false,
@@ -241,7 +242,7 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "Error",
+				State:  zfspool.Error,
 				Reason: fmt.Sprintf(`failed to run '/usr/sbin/zpool status %[1]s': nope!: Process exited with status 1`, somePoolName),
 			},
 			expectSpecHostKey: true,

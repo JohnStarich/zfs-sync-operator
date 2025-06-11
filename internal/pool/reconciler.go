@@ -73,7 +73,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		const retryErrorWait = 2 * time.Minute
 		result.RequeueAfter = retryErrorWait
 		pool.Status = &Status{
-			State:  "Error",
+			State:  Error,
 			Reason: reconcileErr.Error(),
 		}
 	}
@@ -81,7 +81,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return result, errors.Wrap(statusErr, "failed to update status")
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (resourceVersion, state, reason string, returnedErr error) {
+func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (resourceVersion string, state State, reason string, returnedErr error) {
 	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
 
@@ -121,15 +121,4 @@ func stateFieldFromZpoolStatus(status []byte) string {
 		}
 	}
 	return ""
-}
-
-func stateFromStateField(state string) string {
-	// A pool's health status is described by one of three states: online, degraded, or faulted.
-	// - https://openzfs.github.io/openzfs-docs/man/v0.8/8/zpool.8.html#Device_Failure_and_Recovery
-	switch strings.ToUpper(state) { // should already be in uppercase, but uppercasing defensively
-	case "ONLINE", "DEGRADED", "FAULTED":
-		return strings.ToUpper(state[0:1]) + strings.ToLower(state[1:])
-	default:
-		return "Unknown"
-	}
 }
