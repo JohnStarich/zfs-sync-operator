@@ -40,8 +40,8 @@ func (b *Backup) DeepCopyObject() runtime.Object { return baddeepcopy.DeepCopy(b
 
 // Spec defines the desired offsite [Backup] source and destination
 type Spec struct {
-	Source      corev1.LocalObjectReference `json:"source"`
-	Destination corev1.LocalObjectReference `json:"destination"`
+	Destination corev1.LocalObjectReference `json:"destination"` // The destination pool to "zfs receive" snapshots.
+	Source      corev1.LocalObjectReference `json:"source"`      // The source pool to "zfs send" snapshots from.
 }
 
 // Status holds status information for a [Backup]
