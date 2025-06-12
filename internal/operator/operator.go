@@ -91,7 +91,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	const reconcilesPerCPU = 2 // Most of the controllers are network-bound, allow a little shared CPU time
 	mgr, err := manager.New(restConfig, manager.Options{
 		LeaderElection:                true,
-		LeaderElectionID:              name.Operator + ".johnstarich.com",
+		LeaderElectionID:              name.Domain,
 		LeaderElectionNamespace:       c.Namespace,
 		LeaderElectionReleaseOnCancel: true,
 		Logger:                        logger,

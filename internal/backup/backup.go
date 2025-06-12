@@ -15,7 +15,7 @@ import (
 func MustAddToScheme(s *runtime.Scheme) {
 	schemeBuilder := &scheme.Builder{
 		GroupVersion: schema.GroupVersion{
-			Group:   name.Operator + ".johnstarich.com",
+			Group:   name.Domain,
 			Version: "v1alpha1",
 		},
 	}
