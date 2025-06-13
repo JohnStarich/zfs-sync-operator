@@ -89,11 +89,12 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 		level = slog.LevelDebug
 	}
 	operator, err := New(ctx, testEnv.RESTConfig(), Config{
-		LogHandler:        testlog.NewLogHandler(tb, level),
-		MetricsPort:       "0",
-		Namespace:         namespace,
-		idempotentMetrics: true,
-		maxSessionWait:    8 * time.Second,
+		LogHandler:         testlog.NewLogHandler(tb, level),
+		MetricsPort:        "0",
+		Namespace:          namespace,
+		idempotentMetrics:  true,
+		maxSessionWait:     8 * time.Second,
+		onlyWatchNamespace: namespace,
 	})
 	if err != nil {
 		tb.Fatal(err)

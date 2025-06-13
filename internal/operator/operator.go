@@ -19,6 +19,7 @@ import (
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -71,11 +72,12 @@ type Operator struct {
 
 // Config contains configuration to set up an [Operator]
 type Config struct {
-	LogHandler        slog.Handler
-	MetricsPort       string
-	Namespace         string
-	idempotentMetrics bool          // disables safety checks for double metrics registrations
-	maxSessionWait    time.Duration // allows tests to shorten wait times for faster pass/fail results
+	LogHandler         slog.Handler
+	MetricsPort        string
+	Namespace          string
+	idempotentMetrics  bool          // disables safety checks for double metrics registrations
+	maxSessionWait     time.Duration // allows tests to shorten wait times for faster pass/fail results
+	onlyWatchNamespace string        // in tests only, restrict watches to this namespace
 }
 
 // New returns a new [Operator]
@@ -88,8 +90,14 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	}
 	logger := logr.FromSlogHandler(c.LogHandler)
 
+	cacheOptions := cache.Options{}
+	if c.onlyWatchNamespace != "" {
+		cacheOptions.DefaultNamespaces = map[string]cache.Config{c.onlyWatchNamespace: {}}
+	}
+
 	const reconcilesPerCPU = 2 // Most of the controllers are network-bound, allow a little shared CPU time
 	mgr, err := manager.New(restConfig, manager.Options{
+		Cache:                         cacheOptions,
 		LeaderElection:                true,
 		LeaderElectionID:              name.Domain,
 		LeaderElectionNamespace:       c.Namespace,
