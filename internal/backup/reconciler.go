@@ -139,14 +139,11 @@ func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Ba
 
 	{
 		// Fetch all backups with this pool as their destination.
-		// Also filter out any previous source match to avoid duplicates.
+		// There may be duplicates, but this shouldn't matter once they're deduplicated by the event handler.
 		var remainingDestinationBackups BackupList
 		err := r.client.List(ctx, &remainingDestinationBackups, &client.ListOptions{
-			FieldSelector: fields.AndSelectors(
-				fields.OneTermNotEqualSelector(sourceProperty, pool.Name),
-				fields.OneTermEqualSelector(destinationProperty, pool.Name),
-			),
-			Namespace: pool.Namespace,
+			FieldSelector: fields.OneTermEqualSelector(destinationProperty, pool.Name),
+			Namespace:     pool.Namespace,
 		})
 		if err != nil {
 			return nil, errors.WithMessage(err, "Failed to list any remaining destination backups")

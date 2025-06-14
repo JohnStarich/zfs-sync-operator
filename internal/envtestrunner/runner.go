@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -15,12 +14,10 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/johnstarich/zfs-sync-operator/config"
 	"github.com/pkg/errors"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/yaml"
 )
 
 // Runner automates envtest binary installation, startup, and shutdown
@@ -131,7 +128,7 @@ func (r *Runner) setUp(ctx context.Context, out io.Writer) (returnedErr error) {
 	if err != nil {
 		return err
 	}
-	crds, err := crdsFromFS(config.FS())
+	crds, err := config.CustomResourceDefinitions()
 	if err != nil {
 		return err
 	}
@@ -156,28 +153,4 @@ func (r *Runner) setUp(ctx context.Context, out io.Writer) (returnedErr error) {
 
 func (r *Runner) tearDown(context.Context) error {
 	return r.env.Stop()
-}
-
-func crdsFromFS(files fs.FS) ([]*apiextensionsv1.CustomResourceDefinition, error) {
-	var crds []*apiextensionsv1.CustomResourceDefinition
-	err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		contents, err := fs.ReadFile(files, path)
-		if err != nil {
-			return err
-		}
-		var crd apiextensionsv1.CustomResourceDefinition
-		err = yaml.Unmarshal(contents, &crd)
-		if err != nil {
-			return err
-		}
-		crds = append(crds, &crd)
-		return nil
-	})
-	return crds, err
 }
