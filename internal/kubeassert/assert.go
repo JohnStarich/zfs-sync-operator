@@ -64,9 +64,14 @@ func assertableResourceFromObject[Object client.Object](object Object) resource 
 	if value.Kind() == reflect.Ptr {
 		value = value.Elem()
 	}
+	var name string
+	if object.GetGenerateName() == "" {
+		name = object.GetName()
+	}
 	return resource{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            object.GetName(),
+			Name:            name,
+			GenerateName:    object.GetGenerateName(),
 			Namespace:       object.GetNamespace(),
 			Labels:          object.GetLabels(),
 			Annotations:     object.GetAnnotations(),
