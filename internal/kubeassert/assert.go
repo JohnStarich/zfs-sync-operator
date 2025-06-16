@@ -17,28 +17,6 @@ type testingHelper interface {
 	Helper()
 }
 
-func tryHelper(t testingT) func() {
-	if helper, ok := t.(testingHelper); ok {
-		return helper.Helper
-	}
-	return func() {}
-}
-
-// EqualList asserts Kubernetes resource list actual is equal to expected
-func EqualList[List ~[]Value, Value client.Object](t testingT, expected, actual List) {
-	tryHelper(t)()
-	for i := range min(len(expected), len(actual)) {
-		Equal(t, expected[i], actual[i])
-	}
-	if len(expected) != len(actual) {
-		if len(expected) < len(actual) {
-			t.Errorf("Extra actual resources: %#v", actual[len(expected):])
-		} else {
-			t.Errorf("Extra expected resources: %#v", expected[len(actual):])
-		}
-	}
-}
-
 type resource struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -46,20 +24,39 @@ type resource struct {
 	Status            any `json:"status"`
 }
 
+// EqualList asserts Kubernetes resource list actual is equal to expected
+func EqualList[List ~[]Value, Value client.Object](t testingT, expected, actual List) {
+	tryHelper(t)()
+	var expectedResources []resource
+	for _, object := range expected {
+		expectedResources = append(expectedResources, assertableResourceFromObject(object))
+	}
+	var actualResources []resource
+	for _, object := range actual {
+		actualResources = append(actualResources, assertableResourceFromObject(object))
+	}
+	equal(t, expectedResources, actualResources)
+}
+
 // Equal asserts Kubernetes resource actual is equal to expected
 func Equal[Value client.Object](t testingT, expected, actual Value) {
 	tryHelper(t)()
-	if !equal(t, isNil(expected), isNil(actual)) {
-		t.Errorf("Expected and actual's ==nil result should be the same")
-		return
-	}
+	equal(t,
+		assertableResourceFromObject(expected),
+		assertableResourceFromObject(actual))
+}
 
-	expectedResource := assertableResourceFromObject(expected)
-	actualResource := assertableResourceFromObject(actual)
-	equal(t, expectedResource, actualResource)
+func tryHelper(t testingT) func() {
+	if helper, ok := t.(testingHelper); ok {
+		return helper.Helper
+	}
+	return func() {}
 }
 
 func assertableResourceFromObject[Object client.Object](object Object) resource {
+	if any(object) == nil {
+		return resource{}
+	}
 	value := reflect.ValueOf(object)
 	if value.Kind() == reflect.Ptr {
 		value = value.Elem()
@@ -83,14 +80,10 @@ func assertableResourceFromObject[Object client.Object](object Object) resource 
 	}
 }
 
-func isNil(value any) bool {
-	return value == nil
-}
-
 func assertIf(t testingT, condition bool, format string, args ...any) bool {
 	tryHelper(t)()
 	if !condition {
-		t.Errorf(spew.Sprintf(format, args...))
+		t.Errorf(format, args...)
 		return false
 	}
 	return true
