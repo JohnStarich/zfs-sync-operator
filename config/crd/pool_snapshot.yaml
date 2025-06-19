@@ -1,0 +1,62 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: poolsnapshots.zfs-sync-operator.johnstarich.com
+spec:
+  group: zfs-sync-operator.johnstarich.com
+  scope: Namespaced
+  names:
+    plural: poolsnapshots
+    singular: poolsnapshot
+    kind: PoolSnapshot
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              pool:
+                type: object
+                properties:
+                  name:
+                    type: string
+              datasets:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    recursive:
+                      type: object
+                      properties:
+                        skipChildren:
+                          type: array
+                          items:
+                            type: string
+              notAfter:
+                type: string
+                format: date-time
+          status:
+            type: object
+            properties:
+              state:
+                type: string
+              reason:
+                type: string
+    subresources:
+      status: {}
+    selectableFields:
+    - jsonPath: .spec.pool.name
+    additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: Status
+      type: string
+    - jsonPath: .status.reason
+      name: Details
+      type: string

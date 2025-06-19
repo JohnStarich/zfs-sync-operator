@@ -5,10 +5,11 @@ import "strings"
 type State string
 
 const (
-	Online   = State("Online")   // ZFS reported a pool state of ONLINE
 	Degraded = State("Degraded") // ZFS reported a pool state of DEGRADED
-	Faulted  = State("Faulted")  // ZFS reported a pool state of FAULTED
 	Error    = State("Error")    // The operator failed to determine pool state
+	Faulted  = State("Faulted")  // ZFS reported a pool state of FAULTED
+	NotFound = State("NotFound") // ZFS could not a pool with the configured name
+	Online   = State("Online")   // ZFS reported a pool state of ONLINE
 	Unknown  = State("Unknown")  // ZFS reported an unexpected pool state
 )
 

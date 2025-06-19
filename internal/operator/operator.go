@@ -19,6 +19,7 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
+	"github.com/johnstarich/zfs-sync-operator/internal/poolsnapshot"
 	"github.com/pkg/errors"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
@@ -69,6 +70,7 @@ func mustNewScheme() *apiruntime.Scheme {
 	}
 	backup.MustAddToScheme(scheme)
 	pool.MustAddToScheme(scheme)
+	poolsnapshot.MustAddToScheme(scheme)
 	return scheme
 }
 
@@ -83,9 +85,10 @@ type Config struct {
 	LogHandler         slog.Handler
 	MetricsPort        string
 	Namespace          string
-	idempotentMetrics  bool          // disables safety checks for double metrics registrations
-	maxSessionWait     time.Duration // allows tests to shorten wait times for faster pass/fail results
-	onlyWatchNamespace string        // in tests only, restrict watches to this namespace
+	idempotentMetrics  bool             // disables safety checks for double metrics registrations
+	maxSessionWait     time.Duration    // allows tests to shorten wait times for faster pass/fail results
+	onlyWatchNamespace string           // in tests only, restrict watches to this namespace
+	timeNow            func() time.Time // in tests only, control time for more consistent, assertable results
 }
 
 // New returns a new [Operator]
@@ -97,6 +100,9 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	}
 	if c.maxSessionWait == 0 {
 		c.maxSessionWait = 1 * time.Minute
+	}
+	if c.timeNow == nil {
+		c.timeNow = time.Now
 	}
 
 	cacheOptions := cache.Options{}
@@ -125,11 +131,13 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err != nil {
 		return nil, err
 	}
-
 	if err := backup.RegisterReconciler(mgr); err != nil {
 		return nil, err
 	}
-	if err := pool.RegisterReconciler(mgr, c.maxSessionWait); err != nil {
+	if err := pool.RegisterReconciler(mgr, c.maxSessionWait, c.timeNow); err != nil {
+		return nil, err
+	}
+	if err := poolsnapshot.RegisterReconciler(mgr); err != nil {
 		return nil, err
 	}
 
@@ -137,6 +145,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err != nil {
 		return nil, err
 	}
+	// TODO move index creation into registration, remove selectableFields from CRDs since they're only used by this operator
 	if err := indexAllSelectableFields(ctx, mgr, crds); err != nil {
 		return nil, err
 	}

@@ -7,9 +7,8 @@ const (
 
 	// Domain is the domain name to associate with the operator
 	Domain = Operator + ".johnstarich.com"
-)
 
-// Label returns an appropriate label key for the given property
-func Label(property string) string {
-	return Domain + "/" + property
-}
+	// LabelPrefix is the label prefix to use for an operator property.
+	// For example: LabelPrefix + "myproperty" == "mydomain.io/myproperty"
+	LabelPrefix = Domain + "/"
+)

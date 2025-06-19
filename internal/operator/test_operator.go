@@ -53,6 +53,10 @@ func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 	}
 }
 
+func TestTime() time.Time {
+	return time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+
 // TestRunConfig contains data necessary for running tests. Returned from [RunTest].
 type TestRunConfig struct {
 	Namespace string
@@ -95,6 +99,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 		idempotentMetrics:  true,
 		maxSessionWait:     8 * time.Second,
 		onlyWatchNamespace: namespace,
+		timeNow:            TestTime,
 	})
 	if err != nil {
 		tb.Fatal(err)
