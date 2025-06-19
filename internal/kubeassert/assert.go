@@ -18,7 +18,6 @@ type testingHelper interface {
 }
 
 type resource struct {
-	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Spec              any `json:"spec"`
 	Status            any `json:"status"`
@@ -91,10 +90,12 @@ func assertIf(t testingT, condition bool, format string, args ...any) bool {
 
 func equal[Value any](t testingT, expected, actual Value) bool {
 	tryHelper(t)()
+	expectedStr := dump(expected)
+	actualStr := dump(actual)
 	diff, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
-		A:        difflib.SplitLines(dump(expected)),
+		A:        difflib.SplitLines(expectedStr),
 		FromFile: "Expected",
-		B:        difflib.SplitLines(dump(actual)),
+		B:        difflib.SplitLines(actualStr),
 		ToFile:   "Actual",
 		Context:  1,
 	})
@@ -102,7 +103,7 @@ func equal[Value any](t testingT, expected, actual Value) bool {
 		t.Errorf(err.Error())
 		return false
 	}
-	return assertIf(t, reflect.DeepEqual(expected, actual), "Not equal:\n%v", diff)
+	return assertIf(t, reflect.DeepEqual(expected, actual), "Not equal:\nexpected: %v\nactual  : %v\nDiff:\n%v", expectedStr, actualStr, diff)
 }
 
 func dump(object any) string {
