@@ -4,6 +4,7 @@ package pool
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"runtime"
@@ -177,7 +178,7 @@ func tryCleanup(message string, storeErr *error, do func() error) {
 func tryNonCriticalCleanup(ctx context.Context, message string, do func() error) {
 	logger := log.FromContext(ctx)
 	err := do()
-	if err != nil {
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 		logger.Info("Non-critical clean up failed:", message, err)
 	}
 }
