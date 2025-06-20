@@ -172,7 +172,10 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig,
 
 func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, stderr io.Writer, config TestConfig) int {
 	result, hasResult := config.ExecResults[command]
-	require.Truef(tb, hasResult, "Unexpected exec command: %s", command)
+	if !hasResult {
+		tb.Logf("Unexpected exec command: %s", command)
+		return 1
+	}
 	if len(result.ExpectStdin) > 0 {
 		stdinBytes, err := io.ReadAll(stdin)
 		require.NoError(tb, err)

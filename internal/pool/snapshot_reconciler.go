@@ -1,8 +1,13 @@
 package pool
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"time"
 
+	"github.com/pkg/errors"
+	"golang.org/x/crypto/ssh"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -48,5 +53,82 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	if err := r.client.Get(ctx, request.NamespacedName, &snapshot); err != nil {
 		return reconcile.Result{}, err
 	}
-	return reconcile.Result{}, nil
+
+	var pool Pool
+	if err := r.client.Get(ctx, client.ObjectKey{Name: snapshot.Spec.Pool.Name, Namespace: request.Namespace}, &pool); err != nil {
+		return reconcile.Result{}, err
+	}
+	var state SnapshotState
+	var reason string
+	_, reconcileErr := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
+		var err error
+		state, reason, err = r.reconcile(ctx, snapshot, sshSession)
+		return err
+	})
+	result := reconcile.Result{}
+	if reconcileErr == nil {
+		logger.Info("pool reconciled successfully", "state", state)
+		snapshot.Status = &SnapshotStatus{
+			State:  state,
+			Reason: reason,
+		}
+	} else {
+		logger.Error(reconcileErr, "reconcile failed")
+		const retryErrorWait = 2 * time.Minute
+		result.RequeueAfter = retryErrorWait
+		pool.Status = &Status{
+			State:  Error,
+			Reason: reconcileErr.Error(),
+		}
+	}
+	statusErr := r.client.Status().Update(ctx, &snapshot)
+	return result, errors.Wrap(statusErr, "failed to update status")
+}
+
+func (r *SnapshotReconciler) reconcile(_ context.Context, snapshot PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
+	if len(snapshot.Spec.Datasets) == 0 {
+		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
+	}
+
+	var recursiveDatasets, singularDatasets []string
+	for _, dataset := range snapshot.Spec.Datasets {
+		if dataset.Recursive == nil {
+			singularDatasets = append(singularDatasets, dataset.Name)
+		} else {
+			recursiveDatasets = append(recursiveDatasets, dataset.Name)
+			// TODO handle skipChildren
+		}
+	}
+	if len(recursiveDatasets) > 0 {
+		name, args := snapshotCommand(recursiveDatasets, snapshot.Name, true)
+		command := safelyFormatCommand(name, args...)
+		output, err := sshSession.CombinedOutput(command)
+		output = bytes.TrimSpace(output)
+		if err != nil {
+			return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+		}
+	}
+	if len(singularDatasets) > 0 {
+		name, args := snapshotCommand(singularDatasets, snapshot.Name, false)
+		command := safelyFormatCommand(name, args...)
+		output, err := sshSession.CombinedOutput(command)
+		output = bytes.TrimSpace(output)
+		if err != nil {
+			return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+		}
+	}
+
+	return SnapshotCompleted, "", nil
+}
+
+func snapshotCommand(datasets []string, snapshotName string, recursive bool) (name string, args []string) {
+	name = "/usr/sbin/zfs"
+	args = []string{"snapshot"}
+	if recursive {
+		args = append(args, "-r")
+	}
+	for _, dataset := range datasets {
+		args = append(args, fmt.Sprintf("%s@%s", dataset, snapshotName))
+	}
+	return
 }
