@@ -23,26 +23,39 @@ type resource struct {
 	Status            any `json:"status"`
 }
 
-// EqualList asserts Kubernetes resource list actual is equal to expected
+// EqualList is like Equal, but asserts for a slice of Kubernetes resources
 func EqualList[List ~[]Value, Value client.Object](t testingT, expected, actual List) {
 	tryHelper(t)()
+	assertOnStatus := false
 	var expectedResources []resource
 	for _, object := range expected {
-		expectedResources = append(expectedResources, assertableResourceFromObject(object))
+		expectedResource := assertableResourceFromObject(object)
+		if expectedResource.Status != nil {
+			assertOnStatus = true
+		}
+		expectedResources = append(expectedResources, expectedResource)
 	}
 	var actualResources []resource
 	for _, object := range actual {
-		actualResources = append(actualResources, assertableResourceFromObject(object))
+		actualResource := assertableResourceFromObject(object)
+		if !assertOnStatus {
+			actualResource.Status = nil
+		}
+		actualResources = append(actualResources, actualResource)
 	}
 	equal(t, expectedResources, actualResources)
 }
 
-// Equal asserts Kubernetes resource actual is equal to expected
+// Equal asserts Kubernetes resource actual is equal to expected.
+// If expected's Status is nil, actual's status is ignored.
 func Equal[Value client.Object](t testingT, expected, actual Value) {
 	tryHelper(t)()
-	equal(t,
-		assertableResourceFromObject(expected),
-		assertableResourceFromObject(actual))
+	expectedResource := assertableResourceFromObject(expected)
+	actualResource := assertableResourceFromObject(actual)
+	if expectedResource.Status == nil {
+		actualResource.Status = nil
+	}
+	equal(t, expectedResource, actualResource)
 }
 
 func tryHelper(t testingT) func() {
@@ -64,7 +77,7 @@ func assertableResourceFromObject[Object client.Object](object Object) resource 
 	if object.GetGenerateName() == "" {
 		name = object.GetName()
 	}
-	return resource{
+	r := resource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            name,
 			GenerateName:    object.GetGenerateName(),
@@ -74,9 +87,14 @@ func assertableResourceFromObject[Object client.Object](object Object) resource 
 			OwnerReferences: object.GetOwnerReferences(),
 			Finalizers:      object.GetFinalizers(),
 		},
-		Spec:   value.FieldByName("Spec").Interface(),
-		Status: value.FieldByName("Status").Interface(),
 	}
+	if v := value.FieldByName("Spec"); v.Kind() != reflect.Ptr || !v.IsNil() {
+		r.Spec = v.Interface()
+	}
+	if v := value.FieldByName("Status"); v.Kind() != reflect.Ptr || !v.IsNil() {
+		r.Status = v.Interface()
+	}
+	return r
 }
 
 func assertIf(t testingT, condition bool, format string, args ...any) bool {
