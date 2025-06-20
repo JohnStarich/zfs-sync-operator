@@ -18,6 +18,9 @@ spec:
         type: object
         properties:
           spec:
+            x-kubernetes-validations:
+            - message: Spec is immutable
+              rule: self == oldSelf
             type: object
             properties:
               pool:

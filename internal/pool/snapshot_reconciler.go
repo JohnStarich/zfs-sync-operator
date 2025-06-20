@@ -53,6 +53,9 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	if err := r.client.Get(ctx, request.NamespacedName, &snapshot); err != nil {
 		return reconcile.Result{}, err
 	}
+	if snapshot.Status != nil && snapshot.Status.State == SnapshotCompleted {
+		return reconcile.Result{}, nil
+	}
 
 	var pool Pool
 	if err := r.client.Get(ctx, client.ObjectKey{Name: snapshot.Spec.Pool.Name, Namespace: request.Namespace}, &pool); err != nil {
