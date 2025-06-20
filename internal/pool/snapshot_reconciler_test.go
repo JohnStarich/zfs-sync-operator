@@ -1,8 +1,10 @@
 package pool_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
@@ -20,6 +22,11 @@ func TestSnapshot(t *testing.T) {
 		somePoolName     = "some-pool"
 		someSnapshotName = "some-snapshot"
 	)
+	makeTimeoutCtx := func(d time.Duration) context.Context {
+		ctx, cancel := context.WithTimeout(TestEnv.Context(), d)
+		t.Cleanup(cancel)
+		return ctx
+	}
 	for _, tc := range []struct {
 		description  string
 		execResults  map[string]ssh.TestExecResult
@@ -45,6 +52,29 @@ func TestSnapshot(t *testing.T) {
 			},
 			expectStatus: &zfspool.SnapshotStatus{
 				State:  zfspool.SnapshotCompleted,
+				Reason: "",
+			},
+		},
+		{
+			description: "happy path - slow reconcile shows Running",
+			execResults: map[string]ssh.TestExecResult{
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+					Stdout:   []byte(`state: ONLINE`),
+					ExitCode: 0,
+				},
+				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, somePoolName, someSnapshotName): {
+					ExitCode:    0,
+					WaitContext: makeTimeoutCtx(maxWait),
+				},
+			},
+			snapshotSpec: zfspool.SnapshotSpec{
+				Pool: corev1.LocalObjectReference{Name: somePoolName},
+				Datasets: []zfspool.DatasetSelector{
+					{Name: fmt.Sprintf("%s/some-dataset", somePoolName)},
+				},
+			},
+			expectStatus: &zfspool.SnapshotStatus{
+				State:  zfspool.SnapshotPending,
 				Reason: "",
 			},
 		},

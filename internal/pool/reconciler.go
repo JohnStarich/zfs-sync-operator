@@ -150,7 +150,7 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 				return results, err
 			}
 
-			var completed, active, other []*PoolSnapshot
+			var completed, pending, other []*PoolSnapshot
 			nilStatus := 0
 			for _, snapshot := range completedSnapshots.Items {
 				var state SnapshotState
@@ -163,19 +163,19 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 				switch state {
 				case SnapshotCompleted:
 					completed = append(completed, snapshot)
-				case SnapshotPending, SnapshotRunning:
-					active = append(active, snapshot)
+				case SnapshotPending:
+					pending = append(pending, snapshot)
 				default:
 					other = append(other, snapshot)
 				}
 			}
-			logger.Info("Looked up connected snapshots", "nil", nilStatus, "completed", len(completed), "active", len(active), "other", len(other))
+			logger.Info("Looked up connected snapshots", "nil", nilStatus, "completed", len(completed), "pending", len(pending), "other", len(other))
 
 			nextTime, shouldCreateNextSnapshot, err := nextSnapshot(ctx, now, interval.Interval.Duration, completed)
 			if err != nil {
 				return results, err
 			}
-			if len(active) == 0 && shouldCreateNextSnapshot {
+			if len(pending) == 0 && shouldCreateNextSnapshot {
 				spec := pool.Spec.Snapshots.Template
 				spec.Pool.Name = pool.Name
 				err := r.client.Create(ctx, &PoolSnapshot{

@@ -6,5 +6,4 @@ const (
 	SnapshotCompleted = SnapshotState("Completed")
 	SnapshotError     = SnapshotState("Error")
 	SnapshotPending   = SnapshotState("Pending")
-	SnapshotRunning   = SnapshotState("Running")
 )

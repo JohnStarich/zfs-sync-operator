@@ -553,8 +553,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Annotations:  map[string]string{timestampAnnotation: now.Add(1 * time.Hour).Round(1 * time.Hour).Format(time.RFC3339)},
 						Labels:       map[string]string{nameLabel: "hourly"},
 					},
-					Spec:   zfspool.SnapshotSpec{Pool: corev1.LocalObjectReference{Name: somePoolName}},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Spec: zfspool.SnapshotSpec{Pool: corev1.LocalObjectReference{Name: somePoolName}},
 				},
 			},
 		},
@@ -595,8 +594,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Annotations:  map[string]string{timestampAnnotation: now.Add(-1 * time.Hour).Round(1 * time.Hour).Format(time.RFC3339)},
 						Labels:       map[string]string{nameLabel: "hourly"},
 					},
-					Spec:   zfspool.SnapshotSpec{Pool: corev1.LocalObjectReference{Name: somePoolName}},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Spec: zfspool.SnapshotSpec{Pool: corev1.LocalObjectReference{Name: somePoolName}},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -671,8 +669,9 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				var poolSnapshotList zfspool.PoolSnapshotList
 				assert.NoError(collect, TestEnv.Client().List(TestEnv.Context(), &poolSnapshotList, &client.ListOptions{Namespace: run.Namespace}))
-				require.NoError(t, zfspool.SortSnapshotsByDesiredTimestamp(poolSnapshotList.Items))
-				kubeassert.EqualList(collect, tc.expectSnapshots, poolSnapshotList.Items)
+				if assert.NoError(collect, zfspool.SortSnapshotsByDesiredTimestamp(poolSnapshotList.Items)) {
+					kubeassert.EqualList(collect, tc.expectSnapshots, poolSnapshotList.Items)
+				}
 			}, maxWait, tick, "namespace = %s", run.Namespace)
 		})
 	}

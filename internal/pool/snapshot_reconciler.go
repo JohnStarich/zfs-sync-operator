@@ -62,7 +62,7 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	var reason string
 	_, reconcileErr := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
 		var err error
-		state, reason, err = r.reconcile(ctx, snapshot, sshSession)
+		state, reason, err = r.reconcile(ctx, &snapshot, sshSession)
 		return err
 	})
 	result := reconcile.Result{}
@@ -85,9 +85,13 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	return result, errors.Wrap(statusErr, "failed to update status")
 }
 
-func (r *SnapshotReconciler) reconcile(_ context.Context, snapshot PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
+func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
 	if len(snapshot.Spec.Datasets) == 0 {
 		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
+	}
+	snapshot.Status = &SnapshotStatus{State: SnapshotPending}
+	if err := r.client.Status().Update(ctx, snapshot); err != nil {
+		return "", "", err
 	}
 
 	var recursiveDatasets, singularDatasets []string

@@ -2,6 +2,7 @@
 package ssh
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -34,6 +35,7 @@ type TestExecResult struct {
 	Stdout      []byte
 	Stderr      []byte
 	ExitCode    int
+	WaitContext context.Context
 }
 
 // TestServer starts an SSH server and returns the user and private key to use
@@ -185,6 +187,9 @@ func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, s
 	require.NoError(tb, err)
 	_, err = stderr.Write(result.Stderr)
 	require.NoError(tb, err)
+	if result.WaitContext != nil {
+		<-result.WaitContext.Done()
+	}
 	return result.ExitCode
 }
 
