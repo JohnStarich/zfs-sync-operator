@@ -19,7 +19,6 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
-	"github.com/johnstarich/zfs-sync-operator/internal/poolsnapshot"
 	"github.com/pkg/errors"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
@@ -70,7 +69,6 @@ func mustNewScheme() *apiruntime.Scheme {
 	}
 	backup.MustAddToScheme(scheme)
 	pool.MustAddToScheme(scheme)
-	poolsnapshot.MustAddToScheme(scheme)
 	return scheme
 }
 
@@ -135,9 +133,6 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 		return nil, err
 	}
 	if err := pool.RegisterReconciler(mgr, c.maxSessionWait, c.timeNow); err != nil {
-		return nil, err
-	}
-	if err := poolsnapshot.RegisterReconciler(mgr); err != nil {
 		return nil, err
 	}
 

@@ -14,7 +14,6 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/baddeepcopy"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
-	"github.com/johnstarich/zfs-sync-operator/internal/poolsnapshot"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
@@ -35,7 +34,12 @@ func MustAddToScheme(s *ctrlruntime.Scheme) {
 			Version: "v1alpha1",
 		},
 	}
-	schemeBuilder.Register(&Pool{}, &PoolList{})
+	schemeBuilder.Register(
+		&PoolList{},
+		&Pool{},
+		&PoolSnapshotList{},
+		&PoolSnapshot{},
+	)
 	err := schemeBuilder.AddToScheme(s)
 	if err != nil {
 		panic(err)
@@ -83,7 +87,7 @@ type WireGuardSpec struct {
 // SnapshotsSpec defines the desired snapshot schedule and history to maintain
 type SnapshotsSpec struct {
 	Intervals []SnapshotIntervalSpec `json:"intervals,omitempty"`
-	Template  poolsnapshot.Spec      `json:"template"`
+	Template  SnapshotSpec           `json:"template"`
 }
 
 type SnapshotIntervalSpec struct {

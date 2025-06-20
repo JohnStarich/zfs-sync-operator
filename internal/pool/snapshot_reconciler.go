@@ -1,4 +1,4 @@
-package poolsnapshot
+package pool
 
 import (
 	"context"
@@ -13,15 +13,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-// Reconciler reconciles PoolSnapshot resources to create a set of ZFS snapshots across the whole pool
-type Reconciler struct {
+// SnapshotReconciler reconciles PoolSnapshot resources to create a set of ZFS snapshots across the whole pool
+type SnapshotReconciler struct {
 	client client.Client
 }
 
-// RegisterReconciler registers a PoolSnapshot reconciler with manager
-func RegisterReconciler(manager manager.Manager) error {
+// registerSnapshotReconciler registers a PoolSnapshot reconciler with manager
+func registerSnapshotReconciler(manager manager.Manager) error {
 	ctrl, err := controller.New("poolsnapshot", manager, controller.Options{
-		Reconciler: &Reconciler{
+		Reconciler: &SnapshotReconciler{
 			client: manager.GetClient(),
 		},
 	})
@@ -41,7 +41,7 @@ func RegisterReconciler(manager manager.Manager) error {
 	return nil
 }
 
-func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("checking request", "request", request)
 	var snapshot PoolSnapshot

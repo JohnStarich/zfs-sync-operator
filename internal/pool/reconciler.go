@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
-	"github.com/johnstarich/zfs-sync-operator/internal/poolsnapshot"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,7 +58,7 @@ func RegisterReconciler(manager manager.Manager, maxSessionWait time.Duration, t
 		return err
 	}
 
-	return nil
+	return registerSnapshotReconciler(manager)
 }
 
 // Reconcile implements [reconcile.Reconciler]
@@ -136,7 +135,7 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 		}
 		now := r.timeNow()
 		for _, interval := range intervals {
-			var completedSnapshots poolsnapshot.PoolSnapshotList
+			var completedSnapshots PoolSnapshotList
 			err := r.client.List(ctx, &completedSnapshots, &client.ListOptions{
 				LabelSelector: labels.SelectorFromSet(labels.Set{snapshotIntervalLabel: interval.Name}),
 				FieldSelector: fields.AndSelectors(
@@ -151,20 +150,20 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 				return results, err
 			}
 
-			var completed, active, other []*poolsnapshot.PoolSnapshot
+			var completed, active, other []*PoolSnapshot
 			nilStatus := 0
 			for _, snapshot := range completedSnapshots.Items {
-				var state poolsnapshot.State
+				var state SnapshotState
 				if snapshot.Status != nil {
 					state = snapshot.Status.State
 				} else {
-					state = poolsnapshot.Pending
+					state = SnapshotPending
 					nilStatus++
 				}
 				switch state {
-				case poolsnapshot.Completed:
+				case SnapshotCompleted:
 					completed = append(completed, snapshot)
-				case poolsnapshot.Pending, poolsnapshot.Running:
+				case SnapshotPending, SnapshotRunning:
 					active = append(active, snapshot)
 				default:
 					other = append(other, snapshot)
@@ -179,7 +178,7 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 			if len(active) == 0 && shouldCreateNextSnapshot {
 				spec := pool.Spec.Snapshots.Template
 				spec.Pool.Name = pool.Name
-				err := r.client.Create(ctx, &poolsnapshot.PoolSnapshot{
+				err := r.client.Create(ctx, &PoolSnapshot{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName: interval.Name + "-",
 						Namespace:    pool.Namespace,
@@ -248,9 +247,9 @@ func unsignedLen[Value any](values []Value) uint {
 	return uint(len(values))
 }
 
-func SortSnapshotsByDesiredTimestamp(snapshots []*poolsnapshot.PoolSnapshot) error {
+func SortSnapshotsByDesiredTimestamp(snapshots []*PoolSnapshot) error {
 	var sortErr error
-	slices.SortFunc(snapshots, func(a, b *poolsnapshot.PoolSnapshot) int {
+	slices.SortFunc(snapshots, func(a, b *PoolSnapshot) int {
 		annotationA, annotationB := a.Annotations[snapshotTimestampAnnotation], b.Annotations[snapshotTimestampAnnotation]
 		timeA, err := time.Parse(time.RFC3339, annotationA)
 		if sortErr == nil && err != nil {
@@ -267,7 +266,7 @@ func SortSnapshotsByDesiredTimestamp(snapshots []*poolsnapshot.PoolSnapshot) err
 	return sortErr
 }
 
-func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, completedSnapshots []*poolsnapshot.PoolSnapshot) (time.Time, bool, error) {
+func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, completedSnapshots []*PoolSnapshot) (time.Time, bool, error) {
 	logger := log.FromContext(ctx)
 	now = now.UTC()
 	if len(completedSnapshots) == 0 {
