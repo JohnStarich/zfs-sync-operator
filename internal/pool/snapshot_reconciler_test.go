@@ -149,7 +149,7 @@ func TestSnapshot(t *testing.T) {
 			},
 			snapshotSpec: zfspool.SnapshotSpec{
 				Pool:     corev1.LocalObjectReference{Name: somePoolName},
-				Deadline: metav1.Time{Time: operator.TestRelativeTime(-1 * time.Hour)},
+				Deadline: &metav1.Time{Time: operator.TestRelativeTime(-1 * time.Hour)},
 				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 					Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
 				},

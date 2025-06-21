@@ -185,7 +185,7 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 					},
 					Spec: SnapshotSpec{
 						Pool:                 corev1.LocalObjectReference{Name: pool.Name},
-						Deadline:             metav1.Time{Time: nextTime.Add(interval.Interval.Duration)},
+						Deadline:             &metav1.Time{Time: nextTime.Add(interval.Interval.Duration)},
 						SnapshotSpecTemplate: pool.Spec.Snapshots.Template,
 					},
 				})

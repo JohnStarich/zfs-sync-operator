@@ -42,7 +42,6 @@ func registerSnapshotReconciler(ctx context.Context, manager manager.Manager, ti
 	if err != nil {
 		return errors.WithMessage(err, "failed to index PoolSnapshot.spec.pool.name")
 	}
-
 	if err := ctrl.Watch(source.Kind(
 		manager.GetCache(),
 		&PoolSnapshot{},

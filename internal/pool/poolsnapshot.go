@@ -22,8 +22,8 @@ func (s *PoolSnapshot) DeepCopyObject() ctrlruntime.Object { return baddeepcopy.
 
 // SnapshotSpec defines the Pool to snapshot and the set of datasets snapshot
 type SnapshotSpec struct {
-	Pool                 corev1.LocalObjectReference `json:"pool"`     // The Pool to snapshot
-	Deadline             metav1.Time                 `json:"deadline"` // Do not attempt to snapshot after this time. Typically used alongside a snapshot interval, where the next snapshot will take over. Failing to complete the snapshot by this time results in a Failed state.
+	Pool                 corev1.LocalObjectReference `json:"pool"`               // The Pool to snapshot
+	Deadline             *metav1.Time                `json:"deadline,omitempty"` // Do not attempt to snapshot after this time. Typically used alongside a snapshot interval, where the next snapshot will take over. Failing to complete the snapshot by this time results in a Failed state.
 	SnapshotSpecTemplate `json:",inline"`
 }
 
