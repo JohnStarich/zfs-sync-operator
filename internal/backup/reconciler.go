@@ -101,7 +101,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err := r.client.Status().Update(ctx, &backup); err != nil {
 		return reconcile.Result{}, err
 	}
-	return reconcile.Result{}, nil
+	return reconcile.Result{}, reconcileErr
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (state, reason string, returnedErr error) {

@@ -72,7 +72,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	logger.Info("got pool", "pool", pool.Spec, "generation", pool.Generation)
 	resourceVersion, results, reconcileErr := r.reconcile(ctx, pool)
 
-	result := reconcile.Result{}
 	pool.ResourceVersion = resourceVersion
 	if reconcileErr == nil {
 		logger.Info("pool reconciled successfully", "state", results.State)
@@ -82,15 +81,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		}
 	} else {
 		logger.Error(reconcileErr, "reconcile failed")
-		const retryErrorWait = 2 * time.Minute
-		result.RequeueAfter = retryErrorWait
 		pool.Status = &Status{
 			State:  Error,
 			Reason: reconcileErr.Error(),
 		}
 	}
-	statusErr := r.client.Status().Update(ctx, &pool)
-	return result, errors.Wrap(statusErr, "failed to update status")
+	if err := r.client.Status().Update(ctx, &pool); err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to update status")
+	}
+	return reconcile.Result{}, reconcileErr
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (resourceVersion string, results sshResults, returnedErr error) {
