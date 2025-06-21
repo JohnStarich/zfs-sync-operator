@@ -37,10 +37,7 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - single dataset",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
-					Stdout:   []byte(`state: ONLINE`),
-					ExitCode: 0,
-				},
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
@@ -61,10 +58,7 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - slow reconcile shows Running",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
-					Stdout:   []byte(`state: ONLINE`),
-					ExitCode: 0,
-				},
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
 					ExitCode:    0,
 					WaitContext: makeTimeoutCtx(maxWait),
@@ -86,10 +80,7 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - multiple datasets",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
-					Stdout:   []byte(`state: ONLINE`),
-					ExitCode: 0,
-				},
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
@@ -111,10 +102,7 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - multiple recursive datasets",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
-					Stdout:   []byte(`state: ONLINE`),
-					ExitCode: 0,
-				},
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
@@ -142,7 +130,7 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "cannot complete snapshot past deadline",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {Stdout: []byte(`state: ONLINE`)},
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset\@%[2]s`, someZPoolName, someSnapshotName): {
 					Stdout:   []byte(`some error`),
 					ExitCode: 1,
@@ -163,7 +151,7 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "snapshot without matching pool name prefix fails",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 			},
 			snapshotSpec: zfspool.SnapshotSpec{
 				Pool: corev1.LocalObjectReference{Name: somePoolName},
