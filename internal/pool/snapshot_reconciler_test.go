@@ -19,6 +19,7 @@ import (
 func TestSnapshot(t *testing.T) {
 	t.Parallel()
 	const (
+		someZPoolName    = "some-zpool"
 		somePoolName     = "some-pool"
 		someSnapshotName = "some-snapshot"
 	)
@@ -36,11 +37,11 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - single dataset",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
 					Stdout:   []byte(`state: ONLINE`),
 					ExitCode: 0,
 				},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, somePoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
 			},
@@ -48,7 +49,7 @@ func TestSnapshot(t *testing.T) {
 				Pool: corev1.LocalObjectReference{Name: somePoolName},
 				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 					Datasets: []zfspool.DatasetSelector{
-						{Name: fmt.Sprintf("%s/some-dataset", somePoolName)},
+						{Name: fmt.Sprintf("%s/some-dataset", someZPoolName)},
 					},
 				},
 			},
@@ -60,11 +61,11 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - slow reconcile shows Running",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
 					Stdout:   []byte(`state: ONLINE`),
 					ExitCode: 0,
 				},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, somePoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
 					ExitCode:    0,
 					WaitContext: makeTimeoutCtx(maxWait),
 				},
@@ -73,7 +74,7 @@ func TestSnapshot(t *testing.T) {
 				Pool: corev1.LocalObjectReference{Name: somePoolName},
 				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 					Datasets: []zfspool.DatasetSelector{
-						{Name: fmt.Sprintf("%s/some-dataset", somePoolName)},
+						{Name: fmt.Sprintf("%s/some-dataset", someZPoolName)},
 					},
 				},
 			},
@@ -85,11 +86,11 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - multiple datasets",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
 					Stdout:   []byte(`state: ONLINE`),
 					ExitCode: 0,
 				},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, somePoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
 			},
@@ -97,8 +98,8 @@ func TestSnapshot(t *testing.T) {
 				Pool: corev1.LocalObjectReference{Name: somePoolName},
 				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 					Datasets: []zfspool.DatasetSelector{
-						{Name: fmt.Sprintf("%s/some-dataset-1", somePoolName)},
-						{Name: fmt.Sprintf("%s/some-dataset-2", somePoolName)},
+						{Name: fmt.Sprintf("%s/some-dataset-1", someZPoolName)},
+						{Name: fmt.Sprintf("%s/some-dataset-2", someZPoolName)},
 					},
 				},
 			},
@@ -110,11 +111,11 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "happy path - multiple recursive datasets",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {
 					Stdout:   []byte(`state: ONLINE`),
 					ExitCode: 0,
 				},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, somePoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
 			},
@@ -123,11 +124,11 @@ func TestSnapshot(t *testing.T) {
 				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 					Datasets: []zfspool.DatasetSelector{
 						{
-							Name:      fmt.Sprintf("%s/some-dataset-1", somePoolName),
+							Name:      fmt.Sprintf("%s/some-dataset-1", someZPoolName),
 							Recursive: &zfspool.RecursiveDatasetSpec{},
 						},
 						{
-							Name:      fmt.Sprintf("%s/some-dataset-2", somePoolName),
+							Name:      fmt.Sprintf("%s/some-dataset-2", someZPoolName),
 							Recursive: &zfspool.RecursiveDatasetSpec{},
 						},
 					},
@@ -141,8 +142,8 @@ func TestSnapshot(t *testing.T) {
 		{
 			description: "cannot complete snapshot past deadline",
 			execResults: map[string]ssh.TestExecResult{
-				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {Stdout: []byte(`state: ONLINE`)},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset\@%[2]s`, somePoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {Stdout: []byte(`state: ONLINE`)},
+				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset\@%[2]s`, someZPoolName, someSnapshotName): {
 					Stdout:   []byte(`some error`),
 					ExitCode: 1,
 				},
@@ -151,15 +152,32 @@ func TestSnapshot(t *testing.T) {
 				Pool:     corev1.LocalObjectReference{Name: somePoolName},
 				Deadline: &metav1.Time{Time: operator.TestRelativeTime(-1 * time.Hour)},
 				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-					Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+					Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", someZPoolName)}},
 				},
 			},
 			expectStatus: &zfspool.SnapshotStatus{
 				State:  zfspool.SnapshotFailed,
-				Reason: "did not create snapshot before deadline: failed to run '/usr/sbin/zfs snapshot some-pool/some-dataset\\@some-snapshot': some error: Process exited with status 1",
+				Reason: "did not create snapshot before deadline: failed to run '/usr/sbin/zfs snapshot some-zpool/some-dataset\\@some-snapshot': some error: Process exited with status 1",
 			},
 		},
-		// TODO test to verify datasets always have pool-name/ as prefix
+		{
+			description: "snapshot without matching pool name prefix fails",
+			execResults: map[string]ssh.TestExecResult{
+				fmt.Sprintf(`/usr/sbin/zpool status %s`, someZPoolName): {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
+			},
+			snapshotSpec: zfspool.SnapshotSpec{
+				Pool: corev1.LocalObjectReference{Name: somePoolName},
+				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+					Datasets: []zfspool.DatasetSelector{
+						{Name: "some-dataset"},
+					},
+				},
+			},
+			expectStatus: &zfspool.SnapshotStatus{
+				State:  zfspool.SnapshotError,
+				Reason: `invalid dataset selector name "some-dataset": name must start with pool name some-zpool`,
+			},
+		},
 		// TODO require pool status be Online before creating snapshot
 		// TODO ensure a snapshot in Error state counts as active, should only skip over Failed and Completed
 	} {
@@ -180,7 +198,7 @@ func TestSnapshot(t *testing.T) {
 			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
 				ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
 				Spec: &zfspool.Spec{
-					Name: somePoolName,
+					Name: someZPoolName,
 					SSH: &zfspool.SSHSpec{
 						User:    sshUser,
 						Address: sshAddr.String(),

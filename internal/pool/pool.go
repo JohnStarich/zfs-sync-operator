@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -337,4 +338,13 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 
 	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress)
 	return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
+}
+
+func (p Pool) validDatasetName(name string) bool {
+	if name == p.Spec.Name {
+		return true
+	}
+	const datasetSeparator = "/"
+	prefix := p.Spec.Name + datasetSeparator
+	return name != prefix && strings.HasPrefix(name, prefix)
 }

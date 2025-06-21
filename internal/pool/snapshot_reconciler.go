@@ -105,13 +105,13 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 	var reason string
 	_, err := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
 		var err error
-		state, reason, err = r.reconcileWithSSH(ctx, snapshot, sshSession)
+		state, reason, err = r.reconcileWithSSH(ctx, pool, snapshot, sshSession)
 		return err
 	})
 	return state, reason, err
 }
 
-func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, snapshot *PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
+func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, snapshot *PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
 	if len(snapshot.Spec.Datasets) == 0 {
 		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
 	}
@@ -122,6 +122,9 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, snapshot *Poo
 
 	var recursiveDatasets, singularDatasets []string
 	for _, dataset := range snapshot.Spec.Datasets {
+		if !pool.validDatasetName(dataset.Name) {
+			return "", "", errors.Errorf("invalid dataset selector name %q: name must start with pool name %s", dataset.Name, pool.Spec.Name)
+		}
 		if dataset.Recursive == nil {
 			singularDatasets = append(singularDatasets, dataset.Name)
 		} else {
