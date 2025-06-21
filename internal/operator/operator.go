@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	zfsconfig "github.com/johnstarich/zfs-sync-operator/config"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
+	zfsconfig "github.com/johnstarich/zfs-sync-operator/internal/config"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"

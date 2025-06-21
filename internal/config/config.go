@@ -1,5 +1,4 @@
 // Package config embeds static configuration data for use in envtest.
-// TODO move this package to internal
 package config
 
 import (

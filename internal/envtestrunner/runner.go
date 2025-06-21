@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/johnstarich/zfs-sync-operator/config"
+	"github.com/johnstarich/zfs-sync-operator/internal/config"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
