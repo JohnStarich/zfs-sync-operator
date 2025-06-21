@@ -53,8 +53,24 @@ func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 	}
 }
 
-func TestTime() time.Time {
+func testTime() time.Time {
 	return time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+
+func TestRelativeTime(add time.Duration) time.Time {
+	return testTime().UTC().Add(add)
+}
+
+func TestRoundedRelativeTime(round, add time.Duration) time.Time {
+	return testTime().UTC().Round(round).Add(add)
+}
+
+func TestRelativeMetaV1Time(add time.Duration) metav1.Time {
+	return metav1.Time{Time: TestRelativeTime(add).Local()}
+}
+
+func TestRoundedRelativeMetaV1Time(round, add time.Duration) metav1.Time {
+	return metav1.Time{Time: TestRoundedRelativeTime(round, add).Local()}
 }
 
 // TestRunConfig contains data necessary for running tests. Returned from [RunTest].
@@ -99,7 +115,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 		idempotentMetrics:  true,
 		maxSessionWait:     8 * time.Second,
 		onlyWatchNamespace: namespace,
-		timeNow:            TestTime,
+		timeNow:            testTime,
 	})
 	if err != nil {
 		tb.Fatal(err)

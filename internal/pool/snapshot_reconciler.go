@@ -20,14 +20,16 @@ import (
 
 // SnapshotReconciler reconciles PoolSnapshot resources to create a set of ZFS snapshots across the whole pool
 type SnapshotReconciler struct {
-	client client.Client
+	client  client.Client
+	timeNow func() time.Time
 }
 
 // registerSnapshotReconciler registers a PoolSnapshot reconciler with manager
-func registerSnapshotReconciler(manager manager.Manager) error {
+func registerSnapshotReconciler(manager manager.Manager, timeNow func() time.Time) error {
 	ctrl, err := controller.New("poolsnapshot", manager, controller.Options{
 		Reconciler: &SnapshotReconciler{
-			client: manager.GetClient(),
+			client:  manager.GetClient(),
+			timeNow: timeNow,
 		},
 	})
 	if err != nil {
@@ -53,22 +55,7 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	if err := r.client.Get(ctx, request.NamespacedName, &snapshot); err != nil {
 		return reconcile.Result{}, err
 	}
-	if snapshot.Status != nil && snapshot.Status.State == SnapshotCompleted {
-		return reconcile.Result{}, nil
-	}
-
-	var pool Pool
-	if err := r.client.Get(ctx, client.ObjectKey{Name: snapshot.Spec.Pool.Name, Namespace: request.Namespace}, &pool); err != nil {
-		return reconcile.Result{}, err
-	}
-	var state SnapshotState
-	var reason string
-	_, reconcileErr := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
-		var err error
-		state, reason, err = r.reconcile(ctx, &snapshot, sshSession)
-		return err
-	})
-	result := reconcile.Result{}
+	state, reason, reconcileErr := r.reconcile(ctx, &snapshot)
 	if reconcileErr == nil {
 		logger.Info("pool reconciled successfully", "state", state)
 		snapshot.Status = &SnapshotStatus{
@@ -77,18 +64,48 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 		}
 	} else {
 		logger.Error(reconcileErr, "reconcile failed")
-		const retryErrorWait = 2 * time.Minute
-		result.RequeueAfter = retryErrorWait
-		pool.Status = &Status{
-			State:  Error,
+		snapshot.Status = &SnapshotStatus{
+			State:  SnapshotError,
 			Reason: reconcileErr.Error(),
 		}
 	}
-	statusErr := r.client.Status().Update(ctx, &snapshot)
-	return result, errors.Wrap(statusErr, "failed to update status")
+	if err := r.client.Status().Update(ctx, &snapshot); err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to update status")
+	}
+	return reconcile.Result{}, reconcileErr
 }
 
-func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
+func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapshot) (SnapshotState, string, error) {
+	if snapshot.Status != nil {
+		switch snapshot.Status.State {
+		case SnapshotCompleted, SnapshotFailed:
+			return snapshot.Status.State, snapshot.Status.Reason, nil
+		case SnapshotError:
+			if snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
+				return SnapshotFailed, "did not create snapshot before deadline: " + snapshot.Status.Reason, nil
+			}
+		case SnapshotPending:
+			if snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
+				return SnapshotFailed, "did not create snapshot before deadline", nil
+			}
+		}
+	}
+
+	var pool Pool
+	if err := r.client.Get(ctx, client.ObjectKey{Name: snapshot.Spec.Pool.Name, Namespace: snapshot.Namespace}, &pool); err != nil {
+		return "", "", err
+	}
+	var state SnapshotState
+	var reason string
+	_, err := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
+		var err error
+		state, reason, err = r.reconcileWithSSH(ctx, snapshot, sshSession)
+		return err
+	})
+	return state, reason, err
+}
+
+func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, snapshot *PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
 	if len(snapshot.Spec.Datasets) == 0 {
 		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
 	}

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"testing"
 
@@ -25,8 +26,9 @@ const rsaKeyBits = 2048
 
 // TestConfig configures a test SSH server
 type TestConfig struct {
-	Listener    net.Listener // Defaults to a TCP listener on an unused port.
-	ExecResults map[string]TestExecResult
+	Listener          net.Listener              // Defaults to a TCP listener on an unused port.
+	ExecResults       map[string]TestExecResult // Results for specific commands. Prefer this for the controller under test.
+	ExecPrefixResults map[string]TestExecResult // Results for categories of commands. Prefer this for controllers outside the test's scope.
 }
 
 // TestExecResult describes the behavior of a command executed via SSH
@@ -175,8 +177,16 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig,
 func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, stderr io.Writer, config TestConfig) int {
 	result, hasResult := config.ExecResults[command]
 	if !hasResult {
-		tb.Logf("Unexpected exec command: %s", command)
-		return 1
+		for prefix, candidateResult := range config.ExecPrefixResults {
+			hasResult = strings.HasPrefix(command, prefix)
+			if hasResult {
+				result = candidateResult
+				break
+			}
+		}
+	}
+	if !hasResult {
+		tb.Fatalf("Unexpected exec command: %s", command)
 	}
 	if len(result.ExpectStdin) > 0 {
 		stdinBytes, err := io.ReadAll(stdin)

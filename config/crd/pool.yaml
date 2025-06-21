@@ -91,9 +91,6 @@ spec:
                                   type: array
                                   items:
                                     type: string
-                      notAfter:
-                        type: string
-                        format: date-time
                   intervals:
                     type: array
                     items:

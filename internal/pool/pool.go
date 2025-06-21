@@ -87,7 +87,7 @@ type WireGuardSpec struct {
 // SnapshotsSpec defines the desired snapshot schedule and history to maintain
 type SnapshotsSpec struct {
 	Intervals []SnapshotIntervalSpec `json:"intervals,omitempty"`
-	Template  SnapshotSpec           `json:"template"`
+	Template  SnapshotSpecTemplate   `json:"template"`
 }
 
 type SnapshotIntervalSpec struct {

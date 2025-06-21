@@ -42,7 +42,7 @@ spec:
                           type: array
                           items:
                             type: string
-              notAfter:
+              deadline:
                 type: string
                 format: date-time
           status:

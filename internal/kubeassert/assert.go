@@ -18,9 +18,9 @@ type testingHelper interface {
 }
 
 type resource struct {
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              any `json:"spec"`
-	Status            any `json:"status"`
+	ObjectMeta metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec       any               `json:"spec"`
+	Status     any               `json:"status"`
 }
 
 // EqualList is like Equal, but asserts for a slice of Kubernetes resources
@@ -130,6 +130,5 @@ func dump(object any) string {
 		DisablePointerAddresses: true,
 		DisableCapacities:       true,
 		SortKeys:                true,
-		DisableMethods:          true,
 	}).Sdump(object)
 }

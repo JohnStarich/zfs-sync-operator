@@ -11,6 +11,7 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -58,7 +59,7 @@ func RegisterReconciler(manager manager.Manager, maxSessionWait time.Duration, t
 		return err
 	}
 
-	return registerSnapshotReconciler(manager)
+	return registerSnapshotReconciler(manager, timeNow)
 }
 
 // Reconcile implements [reconcile.Reconciler]
@@ -175,8 +176,6 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 				return results, err
 			}
 			if len(pending) == 0 && shouldCreateNextSnapshot {
-				spec := pool.Spec.Snapshots.Template
-				spec.Pool.Name = pool.Name
 				err := r.client.Create(ctx, &PoolSnapshot{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName: interval.Name + "-",
@@ -184,7 +183,11 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 						Labels:       map[string]string{snapshotIntervalLabel: interval.Name},
 						Annotations:  map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
 					},
-					Spec: spec,
+					Spec: SnapshotSpec{
+						Pool:                 corev1.LocalObjectReference{Name: pool.Name},
+						Deadline:             metav1.Time{Time: nextTime.Add(interval.Interval.Duration)},
+						SnapshotSpecTemplate: pool.Spec.Snapshots.Template,
+					},
 				})
 				if err != nil {
 					return results, err
@@ -269,7 +272,7 @@ func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, co
 	logger := log.FromContext(ctx)
 	now = now.UTC()
 	if len(completedSnapshots) == 0 {
-		nextTime := now.Add(interval).Round(interval)
+		nextTime := now.Round(interval).Add(interval)
 		logger.Info("No completed snapshots, recommending next snapshot time", "nextTime", nextTime)
 		return nextTime, true, nil
 	}
