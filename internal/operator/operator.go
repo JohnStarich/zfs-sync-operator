@@ -3,30 +3,23 @@ package operator
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"io"
 	"log/slog"
 	"net"
-	"reflect"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
-	zfsconfig "github.com/johnstarich/zfs-sync-operator/internal/config"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/pkg/errors"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -129,19 +122,10 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err != nil {
 		return nil, err
 	}
-	if err := backup.RegisterReconciler(mgr); err != nil {
+	if err := backup.RegisterReconciler(ctx, mgr); err != nil {
 		return nil, err
 	}
-	if err := pool.RegisterReconciler(mgr, c.maxSessionWait, c.timeNow); err != nil {
-		return nil, err
-	}
-
-	crds, err := zfsconfig.CustomResourceDefinitions()
-	if err != nil {
-		return nil, err
-	}
-	// TODO move index creation into registration, remove selectableFields from CRDs since they're only used by this operator
-	if err := indexAllSelectableFields(ctx, mgr, crds); err != nil {
+	if err := pool.RegisterReconciler(ctx, mgr, c.maxSessionWait, c.timeNow); err != nil {
 		return nil, err
 	}
 
@@ -167,68 +151,4 @@ func (o *Operator) waitUntilLeader() error {
 // Wait blocks until 'o' has terminated, then returns any error encountered
 func (o *Operator) Wait() error {
 	return <-o.startErr
-}
-
-func indexAllSelectableFields(ctx context.Context, mgr manager.Manager, crds []*apiextensionsv1.CustomResourceDefinition) error {
-	logger := log.FromContext(ctx)
-	scheme := mgr.GetScheme()
-	indexer := mgr.GetFieldIndexer()
-	for _, crd := range crds {
-		for _, version := range crd.Spec.Versions {
-			logger.Info("Setting up CRD selectableFields indexes", "crd", crd.Name, "version", version.Name, "fields", version.SelectableFields)
-			for _, selectableField := range version.SelectableFields {
-				typ, ok := scheme.AllKnownTypes()[schema.GroupVersionKind{
-					Group:   crd.Spec.Group,
-					Version: version.Name,
-					Kind:    crd.Spec.Names.Kind,
-				}]
-				if !ok {
-					return errors.Errorf("group version kind for custom resource not found: %s", crd.GroupVersionKind())
-				}
-				err := indexer.IndexField(ctx, reflect.New(typ).Interface().(client.Object), selectableField.JSONPath, func(o client.Object) []string {
-					return findJSONPath(ctx, o, selectableField.JSONPath)
-				})
-				if err != nil {
-					return errors.WithMessagef(err, "failed to index field %q on type %s", selectableField.JSONPath, crd.Spec.Names.Kind)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func findJSONPath(ctx context.Context, value any, jsonPath string) []string {
-	logger := log.FromContext(ctx)
-	jsonValue, err := json.Marshal(value)
-	if err != nil {
-		logger.Error(err, "failed to find jsonPath in value", "value", value)
-		return nil
-	}
-	var destructuredValue any
-	if err := json.Unmarshal(jsonValue, &destructuredValue); err != nil {
-		logger.Error(err, "failed to unmarshal JSON")
-		return nil
-	}
-	const keySeparator = "."
-	keyPath := strings.Split(strings.TrimPrefix(jsonPath, keySeparator), keySeparator)
-	findValue, ok := findKeyPath(destructuredValue, keyPath)
-	if !ok {
-		return nil
-	}
-	stringValue, ok := findValue.(string)
-	if !ok {
-		return nil
-	}
-	return []string{stringValue}
-}
-
-func findKeyPath(value any, keys []string) (any, bool) {
-	if len(keys) == 0 {
-		return value, true
-	}
-	mapValue, ok := value.(map[string]any)
-	if !ok {
-		return nil, false
-	}
-	return findKeyPath(mapValue[keys[0]], keys[1:])
 }

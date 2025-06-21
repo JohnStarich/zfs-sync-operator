@@ -38,7 +38,7 @@ type Reconciler struct {
 }
 
 // RegisterReconciler registers a Pool reconciler with manager
-func RegisterReconciler(manager manager.Manager, maxSessionWait time.Duration, timeNow func() time.Time) error {
+func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSessionWait time.Duration, timeNow func() time.Time) error {
 	ctrl, err := controller.New("pool", manager, controller.Options{
 		Reconciler: &Reconciler{
 			client:         manager.GetClient(),
@@ -59,7 +59,7 @@ func RegisterReconciler(manager manager.Manager, maxSessionWait time.Duration, t
 		return err
 	}
 
-	return registerSnapshotReconciler(manager, timeNow)
+	return registerSnapshotReconciler(ctx, manager, timeNow)
 }
 
 // Reconcile implements [reconcile.Reconciler]

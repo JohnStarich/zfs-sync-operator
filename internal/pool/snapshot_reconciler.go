@@ -25,7 +25,7 @@ type SnapshotReconciler struct {
 }
 
 // registerSnapshotReconciler registers a PoolSnapshot reconciler with manager
-func registerSnapshotReconciler(manager manager.Manager, timeNow func() time.Time) error {
+func registerSnapshotReconciler(ctx context.Context, manager manager.Manager, timeNow func() time.Time) error {
 	ctrl, err := controller.New("poolsnapshot", manager, controller.Options{
 		Reconciler: &SnapshotReconciler{
 			client:  manager.GetClient(),
@@ -34,6 +34,13 @@ func registerSnapshotReconciler(manager manager.Manager, timeNow func() time.Tim
 	})
 	if err != nil {
 		return err
+	}
+
+	err = manager.GetFieldIndexer().IndexField(ctx, &PoolSnapshot{}, ".spec.pool.name", func(o client.Object) []string {
+		return []string{o.(*PoolSnapshot).Spec.Pool.Name}
+	})
+	if err != nil {
+		return errors.WithMessage(err, "failed to index PoolSnapshot.spec.pool.name")
 	}
 
 	if err := ctrl.Watch(source.Kind(

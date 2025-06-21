@@ -54,8 +54,7 @@ spec:
                 type: string
     subresources:
       status: {}
-    selectableFields:
-    - jsonPath: .spec.pool.name
+    selectableFields: []
     additionalPrinterColumns:
     - jsonPath: .status.state
       name: Status

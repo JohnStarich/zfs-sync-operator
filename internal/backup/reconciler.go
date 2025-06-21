@@ -29,7 +29,7 @@ const (
 )
 
 // RegisterReconciler registers a Backup reconciler with manager
-func RegisterReconciler(manager manager.Manager) error {
+func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 	reconciler := &Reconciler{client: manager.GetClient()}
 
 	ctrl, err := controller.New("backup", manager, controller.Options{
@@ -39,6 +39,18 @@ func RegisterReconciler(manager manager.Manager) error {
 		return err
 	}
 
+	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, ".spec.source.name", func(o client.Object) []string {
+		return []string{o.(*Backup).Spec.Source.Name}
+	})
+	if err != nil {
+		return errors.WithMessage(err, "failed to index Backup.spec.source.name")
+	}
+	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, ".spec.destination.name", func(o client.Object) []string {
+		return []string{o.(*Backup).Spec.Destination.Name}
+	})
+	if err != nil {
+		return errors.WithMessage(err, "failed to index Backup.spec.destination.name")
+	}
 	if err := ctrl.Watch(source.Kind(
 		manager.GetCache(),
 		&Backup{},

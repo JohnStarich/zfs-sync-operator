@@ -39,9 +39,7 @@ spec:
                 type: string
     subresources:
       status: {}
-    selectableFields:
-    - jsonPath: .spec.source.name
-    - jsonPath: .spec.destination.name
+    selectableFields: []
     additionalPrinterColumns:
     - jsonPath: .status.state
       name: Status
