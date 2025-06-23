@@ -37,7 +37,8 @@ type TestExecResult struct {
 	Stdout      []byte
 	Stderr      []byte
 	ExitCode    int
-	WaitContext context.Context
+	WaitContext context.Context // WaitContext waits until Done()'s channel is closed before returning. Great for tests on timing behavior.
+	Called      *bool           // Called, when not nil, is set to true when the result is used.
 }
 
 // TestServer starts an SSH server and returns the user and private key to use
@@ -187,6 +188,9 @@ func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, s
 	}
 	if !hasResult {
 		tb.Fatalf("Unexpected exec command: %s", command)
+	}
+	if result.Called != nil {
+		*result.Called = true
 	}
 	if len(result.ExpectStdin) > 0 {
 		stdinBytes, err := io.ReadAll(stdin)
