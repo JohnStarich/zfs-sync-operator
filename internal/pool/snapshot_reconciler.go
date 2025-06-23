@@ -8,6 +8,8 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -24,29 +26,62 @@ type SnapshotReconciler struct {
 	timeNow func() time.Time
 }
 
+const (
+	poolNameProperty = ".spec.pool.name"
+)
+
 // registerSnapshotReconciler registers a PoolSnapshot reconciler with manager
 func registerSnapshotReconciler(ctx context.Context, manager manager.Manager, timeNow func() time.Time) error {
+	reconciler := &SnapshotReconciler{
+		client:  manager.GetClient(),
+		timeNow: timeNow,
+	}
+
 	ctrl, err := controller.New("poolsnapshot", manager, controller.Options{
-		Reconciler: &SnapshotReconciler{
-			client:  manager.GetClient(),
-			timeNow: timeNow,
-		},
+		Reconciler: reconciler,
 	})
 	if err != nil {
 		return err
 	}
 
-	err = manager.GetFieldIndexer().IndexField(ctx, &PoolSnapshot{}, ".spec.pool.name", func(o client.Object) []string {
+	err = manager.GetFieldIndexer().IndexField(ctx, &PoolSnapshot{}, poolNameProperty, func(o client.Object) []string {
 		return []string{o.(*PoolSnapshot).Spec.Pool.Name}
 	})
 	if err != nil {
-		return errors.WithMessage(err, "failed to index PoolSnapshot.spec.pool.name")
+		return errors.WithMessagef(err, "failed to index PoolSnapshot %s", poolNameProperty)
 	}
 	if err := ctrl.Watch(source.Kind(
 		manager.GetCache(),
 		&PoolSnapshot{},
 		&handler.TypedEnqueueRequestForObject[*PoolSnapshot]{},
 		predicate.TypedGenerationChangedPredicate[*PoolSnapshot]{},
+	)); err != nil {
+		return err
+	}
+
+	if err := ctrl.Watch(source.Kind(
+		manager.GetCache(),
+		&Pool{},
+		handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, pool *Pool) []reconcile.Request {
+			logger := log.FromContext(ctx)
+			allSnapshots, err := reconciler.matchingSnapshots(ctx, pool)
+			if err != nil {
+				logger.Error(err, "Failed to find matching snapshots for pool", "pool", pool.Name, "namespace", pool.Namespace)
+				return nil
+			}
+
+			var requests []reconcile.Request
+			for _, snapshot := range allSnapshots {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      snapshot.Name,
+						Namespace: pool.Namespace,
+					},
+				})
+			}
+			logger.Info("Received pool update", "matching snapshots", len(requests))
+			return requests
+		}),
 	)); err != nil {
 		return err
 	}
@@ -63,7 +98,7 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	}
 	state, reason, reconcileErr := r.reconcile(ctx, &snapshot)
 	if reconcileErr == nil {
-		logger.Info("pool reconciled successfully", "state", state)
+		logger.Info("poolsnapshot reconciled successfully", "state", state)
 		snapshot.Status = &SnapshotStatus{
 			State:  state,
 			Reason: reason,
@@ -87,11 +122,11 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 		case SnapshotCompleted, SnapshotFailed:
 			return snapshot.Status.State, snapshot.Status.Reason, nil
 		case SnapshotError:
-			if snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
+			if snapshot.Spec.Deadline != nil && snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
 				return SnapshotFailed, "did not create snapshot before deadline: " + snapshot.Status.Reason, nil
 			}
 		case SnapshotPending:
-			if snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
+			if snapshot.Spec.Deadline != nil && snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
 				return SnapshotFailed, "did not create snapshot before deadline", nil
 			}
 		}
@@ -101,9 +136,19 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 	if err := r.client.Get(ctx, client.ObjectKey{Name: snapshot.Spec.Pool.Name, Namespace: snapshot.Namespace}, &pool); err != nil {
 		return "", "", err
 	}
+	if pool.Status == nil {
+		return SnapshotError, "pool is not ready", nil
+	}
+	if pool.Status.State != Online {
+		message := string(pool.Status.State)
+		if pool.Status.Reason != "" {
+			message = fmt.Sprintf("%s: %s", pool.Status.State, pool.Status.Reason)
+		}
+		return "", "", errors.Errorf("pool is unhealthy: %s", message)
+	}
 	var state SnapshotState
 	var reason string
-	_, err := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
+	err := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
 		var err error
 		state, reason, err = r.reconcileWithSSH(ctx, pool, snapshot, sshSession)
 		return err
@@ -164,4 +209,16 @@ func snapshotCommand(datasets []string, snapshotName string, recursive bool) (na
 		args = append(args, fmt.Sprintf("%s@%s", dataset, snapshotName))
 	}
 	return
+}
+
+func (r *SnapshotReconciler) matchingSnapshots(ctx context.Context, pool *Pool) ([]*PoolSnapshot, error) {
+	var snapshots PoolSnapshotList
+	err := r.client.List(ctx, &snapshots, &client.ListOptions{
+		FieldSelector: fields.OneTermEqualSelector(poolNameProperty, pool.Name),
+		Namespace:     pool.Namespace,
+	})
+	if err != nil {
+		return nil, errors.WithMessage(err, "failed to list matching pool snapshots")
+	}
+	return snapshots.Items, nil
 }

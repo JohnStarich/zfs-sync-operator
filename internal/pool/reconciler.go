@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -59,6 +60,14 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSession
 		return err
 	}
 
+	if err := ctrl.Watch(source.Kind(
+		manager.GetCache(),
+		&PoolSnapshot{},
+		handler.TypedEnqueueRequestForOwner[*PoolSnapshot](manager.GetScheme(), manager.GetRESTMapper(), &Pool{}),
+	)); err != nil {
+		return err
+	}
+
 	return registerSnapshotReconciler(ctx, manager, timeNow)
 }
 
@@ -71,72 +80,61 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 	logger.Info("got pool", "pool", pool.Spec, "generation", pool.Generation)
-	resourceVersion, results, reconcileErr := r.reconcile(ctx, pool)
-
-	pool.ResourceVersion = resourceVersion
-	if reconcileErr == nil {
-		logger.Info("pool reconciled successfully", "state", results.State)
-		pool.Status = &Status{
-			State:  results.State,
-			Reason: results.Reason,
-		}
-	} else {
+	reconcileErr := r.reconcile(ctx, &pool)
+	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
 		pool.Status = &Status{
 			State:  Error,
 			Reason: reconcileErr.Error(),
 		}
+		if err := r.client.Status().Update(ctx, &pool); err != nil {
+			return reconcile.Result{}, errors.Wrap(err, "failed to update status")
+		}
+		return reconcile.Result{}, reconcileErr
 	}
-	if err := r.client.Status().Update(ctx, &pool); err != nil {
-		return reconcile.Result{}, errors.Wrap(err, "failed to update status")
-	}
-	return reconcile.Result{}, reconcileErr
+	logger.Info("pool reconciled successfully", "state", pool.Status.State)
+	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (resourceVersion string, results sshResults, returnedErr error) {
+func (r *Reconciler) reconcile(ctx context.Context, pool *Pool) error {
 	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
-
-	resourceVersion, err := pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
-		var err error
-		results, err = r.reconcileWithSSHSession(ctx, pool, session)
-		return err
+	return pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
+		return r.reconcileWithSSHSession(ctx, pool, session)
 	})
-	return resourceVersion, results, err
 }
 
-type sshResults struct {
-	State  State
-	Reason string
-}
-
-func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, session *ssh.Session) (results sshResults, err error) {
+func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool *Pool, session *ssh.Session) error {
 	logger := log.FromContext(ctx)
 	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
 	zpoolStatus, err := session.CombinedOutput(command)
 	zpoolStatus = bytes.TrimSpace(zpoolStatus)
 	if err != nil {
 		if bytes.HasSuffix(zpoolStatus, []byte(": no such pool")) {
-			return sshResults{
+			pool.Status = &Status{
 				State:  NotFound,
 				Reason: string(zpoolStatus),
-			}, nil
+			}
+			return r.client.Status().Update(ctx, pool)
 		}
-		return results, errors.Wrapf(err, `failed to run '%s': %s`, command, string(zpoolStatus))
+		return errors.Wrapf(err, `failed to run '%s': %s`, command, string(zpoolStatus))
 	}
-	results = sshResults{
+	pool.Status = &Status{
 		State: stateFromStateField(stateFieldFromZpoolStatus(zpoolStatus)),
+	}
+	if err := r.client.Status().Update(ctx, pool); err != nil {
+		return err
 	}
 
 	if pool.Spec.Snapshots != nil {
 		intervals, err := pool.Spec.Snapshots.validateIntervals()
 		if err != nil {
-			return results, err
+			return err
 		}
 		now := r.timeNow()
 		for _, interval := range intervals {
-			var completedSnapshots PoolSnapshotList
-			err := r.client.List(ctx, &completedSnapshots, &client.ListOptions{
+			var allSnapshots PoolSnapshotList
+			err := r.client.List(ctx, &allSnapshots, &client.ListOptions{
 				LabelSelector: labels.SelectorFromSet(labels.Set{snapshotIntervalLabel: interval.Name}),
 				FieldSelector: fields.AndSelectors(
 					fields.OneTermEqualSelector(".spec.pool.name", pool.Name),
@@ -144,15 +142,15 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 				Namespace: pool.Namespace,
 			})
 			if err != nil {
-				return results, errors.WithMessagef(err, "failed to retrieve PoolSnapshots for pool %s on interval %s", pool.Name, interval.Name)
+				return errors.WithMessagef(err, "failed to retrieve PoolSnapshots for pool %s on interval %s", pool.Name, interval.Name)
 			}
-			if err := SortSnapshotsByDesiredTimestamp(completedSnapshots.Items); err != nil {
-				return results, err
+			if err := SortSnapshotsByDesiredTimestamp(allSnapshots.Items); err != nil {
+				return err
 			}
 
-			var completed, pending, other []*PoolSnapshot
+			var completed, pending, failed []*PoolSnapshot
 			nilStatus := 0
-			for _, snapshot := range completedSnapshots.Items {
+			for _, snapshot := range allSnapshots.Items {
 				var state SnapshotState
 				if snapshot.Status != nil {
 					state = snapshot.Status.State
@@ -163,43 +161,48 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 				switch state {
 				case SnapshotCompleted:
 					completed = append(completed, snapshot)
-				case SnapshotPending:
+				case SnapshotPending, SnapshotError:
 					pending = append(pending, snapshot)
-				default:
-					other = append(other, snapshot)
+				case SnapshotFailed:
+					failed = append(failed, snapshot)
 				}
 			}
-			logger.Info("Looked up connected snapshots", "nil", nilStatus, "completed", len(completed), "pending", len(pending), "other", len(other))
+			logger.Info("Looked up connected snapshots", "nil", nilStatus, "pending", len(pending), "completed", len(completed), "failed", len(failed))
 
-			nextTime, shouldCreateNextSnapshot, err := nextSnapshot(ctx, now, interval.Interval.Duration, completed)
-			if err != nil {
-				return results, err
-			}
-			if len(pending) == 0 && shouldCreateNextSnapshot {
-				err := r.client.Create(ctx, &PoolSnapshot{
-					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: interval.Name + "-",
-						Namespace:    pool.Namespace,
-						Labels:       map[string]string{snapshotIntervalLabel: interval.Name},
-						Annotations:  map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
-					},
-					Spec: SnapshotSpec{
-						Pool:                 corev1.LocalObjectReference{Name: pool.Name},
-						Deadline:             &metav1.Time{Time: nextTime.Add(interval.Interval.Duration)},
-						SnapshotSpecTemplate: pool.Spec.Snapshots.Template,
-					},
-				})
+			if len(pending) == 0 {
+				nextTime, shouldCreateNextSnapshot, err := nextSnapshot(ctx, now, interval.Interval.Duration, completed)
 				if err != nil {
-					return results, err
+					return err
+				}
+				if shouldCreateNextSnapshot {
+					snapshot := PoolSnapshot{
+						ObjectMeta: metav1.ObjectMeta{
+							GenerateName: interval.Name + "-",
+							Namespace:    pool.Namespace,
+							Labels:       map[string]string{snapshotIntervalLabel: interval.Name},
+							Annotations:  map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
+						},
+						Spec: SnapshotSpec{
+							Pool:                 corev1.LocalObjectReference{Name: pool.Name},
+							Deadline:             &metav1.Time{Time: nextTime.Add(interval.Interval.Duration)},
+							SnapshotSpecTemplate: pool.Spec.Snapshots.Template,
+						},
+					}
+					if err := controllerutil.SetControllerReference(pool, &snapshot, r.client.Scheme()); err != nil {
+						return err
+					}
+					if err := r.client.Create(ctx, &snapshot); err != nil {
+						return err
+					}
 				}
 			}
 			const maxFailedHistory = 1
-			if len(other) > maxFailedHistory {
-				expired := dropRight(other, maxFailedHistory)
+			if len(failed) > maxFailedHistory {
+				expired := dropRight(failed, maxFailedHistory)
 				logger.Info("Cleaning up oldest failed snapshots", "failed", len(expired), "maxFailedHistory", maxFailedHistory)
 				for _, expiredSnapshot := range expired {
 					if err := r.client.Delete(ctx, expiredSnapshot); err != nil {
-						return results, err
+						return err
 					}
 				}
 			}
@@ -208,14 +211,14 @@ func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool Pool, ses
 				logger.Info("Cleaning up snapshots older than maximum history", "expired", len(expired), "maxHistory", interval.HistoryLimit)
 				for _, expiredSnapshot := range expired {
 					if err := r.client.Delete(ctx, expiredSnapshot); err != nil {
-						return results, err
+						return err
 					}
 				}
 			}
 		}
 	}
 
-	return results, nil
+	return nil
 }
 
 // stateFieldFromZpoolStatus parses the plain text output of 'zpool status <pool>'.

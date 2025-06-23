@@ -131,10 +131,6 @@ func TestSnapshot(t *testing.T) {
 			description: "cannot complete snapshot past deadline",
 			execResults: map[string]ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset\@%[2]s`, someZPoolName, someSnapshotName): {
-					Stdout:   []byte(`some error`),
-					ExitCode: 1,
-				},
 			},
 			snapshotSpec: zfspool.SnapshotSpec{
 				Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -145,7 +141,7 @@ func TestSnapshot(t *testing.T) {
 			},
 			expectStatus: &zfspool.SnapshotStatus{
 				State:  zfspool.SnapshotFailed,
-				Reason: "did not create snapshot before deadline: failed to run '/usr/sbin/zfs snapshot some-zpool/some-dataset\\@some-snapshot': some error: Process exited with status 1",
+				Reason: "did not create snapshot before deadline: pool is not ready",
 			},
 		},
 		{
@@ -166,8 +162,25 @@ func TestSnapshot(t *testing.T) {
 				Reason: `invalid dataset selector name "some-dataset": name must start with pool name some-zpool`,
 			},
 		},
-		// TODO require pool status be Online before creating snapshot
-		// TODO ensure a snapshot in Error state counts as active, should only skip over Failed and Completed
+		{
+			description: "degraded pool fails",
+			execResults: map[string]ssh.TestExecResult{
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: DEGRADED`), ExitCode: 0},
+			},
+			snapshotSpec: zfspool.SnapshotSpec{
+				Pool: corev1.LocalObjectReference{Name: somePoolName},
+				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+					Datasets: []zfspool.DatasetSelector{
+						{Name: fmt.Sprintf("%s/some-dataset", someZPoolName)},
+					},
+				},
+			},
+			expectStatus: &zfspool.SnapshotStatus{
+				State:  zfspool.SnapshotError,
+				Reason: "pool is unhealthy: Degraded",
+			},
+		},
+		// TODO use finalizer to clean up snapshot
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()

@@ -84,7 +84,7 @@ func assertableResourceFromObject[Object client.Object](object Object) resource 
 			Namespace:       object.GetNamespace(),
 			Labels:          object.GetLabels(),
 			Annotations:     object.GetAnnotations(),
-			OwnerReferences: object.GetOwnerReferences(),
+			OwnerReferences: assertableOwnerReferences(object.GetOwnerReferences()),
 			Finalizers:      object.GetFinalizers(),
 		},
 	}
@@ -131,4 +131,13 @@ func dump(object any) string {
 		DisableCapacities:       true,
 		SortKeys:                true,
 	}).Sdump(object)
+}
+
+func assertableOwnerReferences(ownerRefs []metav1.OwnerReference) []metav1.OwnerReference {
+	var assertableRefs []metav1.OwnerReference
+	for _, ref := range ownerRefs {
+		ref.UID = ""
+		assertableRefs = append(assertableRefs, ref)
+	}
+	return assertableRefs
 }

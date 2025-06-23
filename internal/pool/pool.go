@@ -187,28 +187,27 @@ type PoolList struct {
 func (l *PoolList) DeepCopyObject() ctrlruntime.Object { return baddeepcopy.DeepCopy(l) }
 
 // WithSession starts an SSH session (optionally over WireGuard) using p's Spec, runs do with the session, then tears everything down
-func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func(*ssh.Session) error) (resourceVersion string, returnedErr error) {
+func (p *Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func(*ssh.Session) error) (returnedErr error) {
 	logger := log.FromContext(ctx)
-	resourceVersion = p.ResourceVersion
 
 	if p.Spec == nil || p.Spec.SSH == nil {
-		return resourceVersion, errors.New("ssh is required")
+		return errors.New("ssh is required")
 	}
 
 	conn, err := p.dialSSHConnection(ctx, client)
 	if err != nil {
-		return resourceVersion, err
+		return err
 	}
 	defer tryNonCriticalCleanup(ctx, currentLine(), conn.Close)
 	logger.Info("SSH TCP connection established")
 
 	sshPrivateKey, err := getSecretKey(ctx, client, p.Namespace, p.Spec.SSH.PrivateKey)
 	if err != nil {
-		return resourceVersion, err
+		return err
 	}
 	signer, err := ssh.ParsePrivateKey(sshPrivateKey)
 	if err != nil {
-		return resourceVersion, err
+		return err
 	}
 
 	sshAddress := p.Spec.SSH.Address
@@ -217,7 +216,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 	if p.Spec.SSH.HostKey != nil {
 		key, err := ssh.ParsePublicKey(*p.Spec.SSH.HostKey)
 		if err != nil {
-			return resourceVersion, errors.WithMessage(err, "parse spec.ssh.hostKey")
+			return errors.WithMessage(err, "parse spec.ssh.hostKey")
 		}
 		hostKeyCallback = ssh.FixedHostKey(key)
 	} else {
@@ -225,9 +224,7 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 			// Save host key for validation in next reconcile
 			poolWithHostKey := p
 			poolWithHostKey.Spec.SSH.HostKey = pointer.Of(key.Marshal())
-			err := client.Update(ctx, &poolWithHostKey)
-			resourceVersion = poolWithHostKey.ResourceVersion
-			return err
+			return client.Update(ctx, poolWithHostKey)
 		})
 	}
 
@@ -239,16 +236,16 @@ func (p Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func
 	logger.Info("connecting via SSH", "address", sshAddress)
 	sshConn, channels, requests, err := ssh.NewClientConn(conn, sshAddress, &config)
 	if err != nil {
-		return resourceVersion, err
+		return err
 	}
 	defer tryCleanup(currentLine(), &returnedErr, sshConn.Close)
 	sshClient := ssh.NewClient(sshConn, channels, requests)
 	session, err := sshClient.NewSession()
 	if err != nil {
-		return resourceVersion, err
+		return err
 	}
 	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
-	return resourceVersion, do(session)
+	return do(session)
 }
 
 func currentLine() string {

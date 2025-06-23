@@ -9,6 +9,7 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/kubeassert"
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
@@ -20,6 +21,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 var TestEnv *envtestrunner.Runner //nolint:gochecknoglobals // The test environment is very expensive to set up, so this performance optimization is required for fast test execution.
@@ -394,6 +396,16 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecRes
 	}
 }
 
+func makePoolOwnerReference(poolName string) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion:         name.Domain + "/v1alpha1",
+		Kind:               "Pool",
+		Name:               poolName,
+		Controller:         pointer.Of(true),
+		BlockOwnerDeletion: pointer.Of(true),
+	}
+}
+
 func TestPoolCreatesSnapshots(t *testing.T) {
 	t.Parallel()
 	const (
@@ -427,9 +439,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "hourly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -458,9 +471,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "hourly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -472,9 +486,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "daily-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(24*time.Hour, 24*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "daily"},
+						GenerateName:    "daily-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(24*time.Hour, 24*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "daily"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -486,9 +501,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "weekly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(7*24*time.Hour, 7*24*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "weekly"},
+						GenerateName:    "weekly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(7*24*time.Hour, 7*24*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "weekly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -500,9 +516,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "monthly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(365*24*time.Hour/12, 365*24*time.Hour/12).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "monthly"},
+						GenerateName:    "monthly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(365*24*time.Hour/12, 365*24*time.Hour/12).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "monthly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -514,9 +531,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "yearly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(365*24*time.Hour, 365*24*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "yearly"},
+						GenerateName:    "yearly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(365*24*time.Hour, 365*24*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "yearly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -564,9 +582,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "hourly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -614,9 +633,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, -1*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, -1*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "hourly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -625,12 +645,14 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
 						},
 					},
+					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 0).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: operator.TestRoundedRelativeTime(1*time.Hour, 0).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "hourly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference(somePoolName)},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -639,6 +661,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 							Datasets: []zfspool.DatasetSelector{{Name: somePoolName, Recursive: &zfspool.RecursiveDatasetSpec{}}},
 						},
 					},
+					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
 				},
 			},
 		},
@@ -657,7 +680,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 					sshPrivateKeySelector: sshClientPrivateKey,
 				},
 			}))
-			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+			pool := zfspool.Pool{
 				ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
 				Spec: &zfspool.Spec{
 					Name: somePoolName,
@@ -671,22 +694,27 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 							Key: sshPrivateKeySelector,
 						},
 					},
-					Snapshots: tc.snapshotsSpec,
 				},
-			}))
+			}
+			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &pool))
 			for _, existingSnapshot := range tc.existing {
 				snapshot := zfspool.PoolSnapshot{
 					ObjectMeta: existingSnapshot.ObjectMeta,
 					Spec:       existingSnapshot.Spec,
 				}
 				snapshot.Namespace = run.Namespace
+				require.NoError(t, controllerutil.SetControllerReference(&pool, &snapshot, TestEnv.Client().Scheme()))
 				require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &snapshot))
+
 				require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 					var statusCheck zfspool.PoolSnapshot
 					assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&snapshot), &statusCheck))
 					assert.Equal(collect, existingSnapshot.Status, statusCheck.Status)
 				}, maxWait, tick, "namespace = %s", run.Namespace)
 			}
+			require.NoError(t, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
+			pool.Spec.Snapshots = tc.snapshotsSpec // enable schedule
+			require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &pool))
 
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				pool := zfspool.Pool{
