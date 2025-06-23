@@ -8,7 +8,7 @@ const (
 	// Domain is the domain name to associate with the operator
 	Domain = Operator + ".johnstarich.com"
 
-	// LabelPrefix is the label prefix to use for an operator property.
-	// For example: LabelPrefix + "myproperty" == "mydomain.io/myproperty"
-	LabelPrefix = Domain + "/"
+	// DomainPrefix is the label prefix to use for an operator property.
+	// For example: DomainPrefix + "myproperty" == "mydomain.io/myproperty"
+	DomainPrefix = Domain + "/"
 )

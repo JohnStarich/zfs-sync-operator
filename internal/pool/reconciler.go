@@ -27,8 +27,8 @@ import (
 )
 
 const (
-	snapshotIntervalLabel       = name.LabelPrefix + "snapshot-interval-name"
-	snapshotTimestampAnnotation = name.LabelPrefix + "snapshot-timestamp"
+	snapshotIntervalLabel       = name.DomainPrefix + "snapshot-interval-name"
+	snapshotTimestampAnnotation = name.DomainPrefix + "snapshot-timestamp"
 )
 
 // Reconciler reconciles Pool resources to validate their Pools and associated connections
