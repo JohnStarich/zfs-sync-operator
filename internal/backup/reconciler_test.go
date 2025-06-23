@@ -88,16 +88,16 @@ func TestBackupReady(t *testing.T) {
 
 func makePool(tb testing.TB, name string, run operator.TestRunConfig, shouldErr bool) zfspool.Pool {
 	tb.Helper()
-	result := ssh.TestExecResult{
+	result := &ssh.TestExecResult{
 		Stdout: []byte(`state: ONLINE`),
 	}
 	if shouldErr {
-		result = ssh.TestExecResult{
+		result = &ssh.TestExecResult{
 			Stdout:   []byte(`error!`),
 			ExitCode: 1,
 		}
 	}
-	sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{ExecResults: map[string]ssh.TestExecResult{
+	sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{ExecResults: map[string]*ssh.TestExecResult{
 		fmt.Sprintf(`/usr/sbin/zpool status %s`, name): result,
 	}})
 	const (

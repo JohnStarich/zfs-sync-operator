@@ -26,9 +26,9 @@ const rsaKeyBits = 2048
 
 // TestConfig configures a test SSH server
 type TestConfig struct {
-	Listener          net.Listener              // Defaults to a TCP listener on an unused port.
-	ExecResults       map[string]TestExecResult // Results for specific commands. Prefer this for the controller under test.
-	ExecPrefixResults map[string]TestExecResult // Results for categories of commands. Prefer this for controllers outside the test's scope.
+	Listener          net.Listener               // Defaults to a TCP listener on an unused port.
+	ExecResults       map[string]*TestExecResult // Results for specific commands. Prefer this for the controller under test.
+	ExecPrefixResults map[string]*TestExecResult // Results for categories of commands. Prefer this for controllers outside the test's scope.
 }
 
 // TestExecResult describes the behavior of a command executed via SSH

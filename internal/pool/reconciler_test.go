@@ -40,12 +40,12 @@ func TestPoolWithOnlySSH(t *testing.T) {
 	const somePoolName = "somepool"
 	for _, tc := range []struct {
 		description  string
-		execResults  map[string]ssh.TestExecResult
+		execResults  map[string]*ssh.TestExecResult
 		expectStatus *zfspool.Status
 	}{
 		{
 			description: "happy path",
-			execResults: map[string]ssh.TestExecResult{
+			execResults: map[string]*ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
 					Stdout: fmt.Appendf(nil, `
   pool: %[1]s
@@ -72,7 +72,7 @@ config:
 		},
 		{
 			description: "pool not found",
-			execResults: map[string]ssh.TestExecResult{
+			execResults: map[string]*ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
 					Stdout:   fmt.Appendf(nil, "cannot open '%[1]s': no such pool\n", somePoolName),
 					ExitCode: 1,
@@ -85,7 +85,7 @@ config:
 		},
 		{
 			description: "unexpected command error",
-			execResults: map[string]ssh.TestExecResult{
+			execResults: map[string]*ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
 					Stdout:   []byte("nope!\n"),
 					ExitCode: 1,
@@ -154,14 +154,14 @@ func TestPoolWithSSHOverWireGuard(t *testing.T) {
 	)
 	for _, tc := range []struct {
 		description           string
-		execResults           map[string]ssh.TestExecResult
+		execResults           map[string]*ssh.TestExecResult
 		mutateWireGuardSecret func(validSecretData map[string][]byte)
 		expectStatus          *zfspool.Status
 		expectSpecHostKey     bool
 	}{
 		{
 			description: "happy path",
-			execResults: map[string]ssh.TestExecResult{
+			execResults: map[string]*ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
 					Stdout: fmt.Appendf(nil, `
   pool: %[1]s
@@ -189,7 +189,7 @@ config:
 		},
 		{
 			description: "pool not found",
-			execResults: map[string]ssh.TestExecResult{
+			execResults: map[string]*ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
 					Stdout:   fmt.Appendf(nil, "cannot open '%[1]s': no such pool\n", somePoolName),
 					ExitCode: 1,
@@ -210,7 +210,7 @@ config:
 				bustedPrivateKey[4] = 'o'
 				validSecretData[wireguardSecretKeyLocalPrivateKey] = bustedPrivateKey
 			},
-			execResults: map[string]ssh.TestExecResult{
+			execResults: map[string]*ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
 					Stdout: fmt.Appendf(nil, `
   pool: %[1]s
@@ -238,7 +238,7 @@ config:
 		},
 		{
 			description: "unexpected command error",
-			execResults: map[string]ssh.TestExecResult{
+			execResults: map[string]*ssh.TestExecResult{
 				fmt.Sprintf(`/usr/sbin/zpool status %s`, somePoolName): {
 					Stdout:   []byte("nope!\n"),
 					ExitCode: 1,
@@ -353,7 +353,7 @@ type TestWireGuard struct {
 	PresharedKey    []byte
 }
 
-func startSSHOverWireGuard(tb testing.TB, execResults map[string]ssh.TestExecResult) TestSSHOverWireGuard {
+func startSSHOverWireGuard(tb testing.TB, execResults map[string]*ssh.TestExecResult) TestSSHOverWireGuard {
 	presharedKey, err := wgtypes.GenerateKey()
 	require.NoError(tb, err)
 
@@ -433,8 +433,8 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 			},
 			sshConfig: ssh.TestConfig{
-				ExecResults:       map[string]ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
@@ -465,8 +465,8 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 			},
 			sshConfig: ssh.TestConfig{
-				ExecResults:       map[string]ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
@@ -576,8 +576,8 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 			},
 			sshConfig: ssh.TestConfig{
-				ExecResults:       map[string]ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
@@ -627,8 +627,8 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 			},
 			sshConfig: ssh.TestConfig{
-				ExecResults:       map[string]ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
