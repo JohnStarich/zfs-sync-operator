@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/fields"
@@ -27,7 +29,8 @@ type SnapshotReconciler struct {
 }
 
 const (
-	poolNameProperty = ".spec.pool.name"
+	poolNameProperty         = ".spec.pool.name"
+	snapshotDestroyFinalizer = name.DomainPrefix + "zfs-destroy-snapshot"
 )
 
 // registerSnapshotReconciler registers a PoolSnapshot reconciler with manager
@@ -117,19 +120,11 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 }
 
 func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapshot) (SnapshotState, string, error) {
-	if snapshot.Status != nil {
-		switch snapshot.Status.State {
-		case SnapshotCompleted, SnapshotFailed:
-			return snapshot.Status.State, snapshot.Status.Reason, nil
-		case SnapshotError:
-			if snapshot.Spec.Deadline != nil && snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
-				return SnapshotFailed, "did not create snapshot before deadline: " + snapshot.Status.Reason, nil
-			}
-		case SnapshotPending:
-			if snapshot.Spec.Deadline != nil && snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
-				return SnapshotFailed, "did not create snapshot before deadline", nil
-			}
-		}
+	if snapshot.Status == nil { // Guard against nil status
+		snapshot.Status = &SnapshotStatus{State: SnapshotPending}
+	}
+	if snapshot.DeletionTimestamp == nil && snapshot.Status.State == SnapshotCompleted || snapshot.Status.State == SnapshotFailed {
+		return snapshot.Status.State, snapshot.Status.Reason, nil
 	}
 
 	var pool Pool
@@ -146,6 +141,7 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 		}
 		return "", "", errors.Errorf("pool is unhealthy: %s", message)
 	}
+
 	var state SnapshotState
 	var reason string
 	err := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
@@ -160,12 +156,7 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 	if len(snapshot.Spec.Datasets) == 0 {
 		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
 	}
-	snapshot.Status = &SnapshotStatus{State: SnapshotPending}
-	if err := r.client.Status().Update(ctx, snapshot); err != nil {
-		return "", "", err
-	}
-
-	var recursiveDatasets, singularDatasets []string
+	var recursiveDatasets, singularDatasets []string // Prepare snapshot's matching datasets
 	for _, dataset := range snapshot.Spec.Datasets {
 		if !pool.validDatasetName(dataset.Name) {
 			return "", "", errors.Errorf("invalid dataset selector name %q: name must start with pool name %s", dataset.Name, pool.Spec.Name)
@@ -177,8 +168,51 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 			// TODO handle skipChildren
 		}
 	}
+
+	if snapshot.DeletionTimestamp != nil {
+		if !slices.Contains(snapshot.Finalizers, snapshotDestroyFinalizer) {
+			return snapshot.Status.State, snapshot.Status.Reason, nil
+		}
+		if len(recursiveDatasets) > 0 {
+			name, args := destroySnapshotCommand(recursiveDatasets, snapshot.Name, true)
+			command := safelyFormatCommand(name, args...)
+			output, err := sshSession.CombinedOutput(command)
+			output = bytes.TrimSpace(output)
+			if err != nil {
+				return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+			}
+		}
+		if len(singularDatasets) > 0 {
+			name, args := destroySnapshotCommand(singularDatasets, snapshot.Name, false)
+			command := safelyFormatCommand(name, args...)
+			output, err := sshSession.CombinedOutput(command)
+			output = bytes.TrimSpace(output)
+			if err != nil {
+				return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+			}
+		}
+
+		snapshot.Finalizers = slices.DeleteFunc(snapshot.Finalizers, func(s string) bool { return s == snapshotDestroyFinalizer })
+		return snapshot.Status.State, snapshot.Status.Reason, r.client.Update(ctx, snapshot)
+	}
+
+	if snapshot.Spec.Deadline != nil && snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
+		return SnapshotFailed, "did not create snapshot before deadline", nil
+	}
+
+	snapshot.Status = &SnapshotStatus{State: SnapshotPending}
+	if err := r.client.Status().Update(ctx, snapshot); err != nil {
+		return "", "", err
+	}
+	if !slices.Contains(snapshot.Finalizers, snapshotDestroyFinalizer) {
+		snapshot.Finalizers = append(snapshot.Finalizers, snapshotDestroyFinalizer)
+		if err := r.client.Update(ctx, snapshot); err != nil {
+			return "", "", err
+		}
+	}
+
 	if len(recursiveDatasets) > 0 {
-		name, args := snapshotCommand(recursiveDatasets, snapshot.Name, true)
+		name, args := createSnapshotCommand(recursiveDatasets, snapshot.Name, true)
 		command := safelyFormatCommand(name, args...)
 		output, err := sshSession.CombinedOutput(command)
 		output = bytes.TrimSpace(output)
@@ -187,7 +221,7 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 		}
 	}
 	if len(singularDatasets) > 0 {
-		name, args := snapshotCommand(singularDatasets, snapshot.Name, false)
+		name, args := createSnapshotCommand(singularDatasets, snapshot.Name, false)
 		command := safelyFormatCommand(name, args...)
 		output, err := sshSession.CombinedOutput(command)
 		output = bytes.TrimSpace(output)
@@ -199,9 +233,15 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 	return SnapshotCompleted, "", nil
 }
 
-func snapshotCommand(datasets []string, snapshotName string, recursive bool) (name string, args []string) {
-	name = "/usr/sbin/zfs"
-	args = []string{"snapshot"}
+func createSnapshotCommand(datasets []string, snapshotName string, recursive bool) (name string, args []string) {
+	return "/usr/sbin/zfs", append([]string{"snapshot"}, snapshotArgs(datasets, snapshotName, recursive)...)
+}
+
+func destroySnapshotCommand(datasets []string, snapshotName string, recursive bool) (name string, args []string) {
+	return "/usr/sbin/zfs", append([]string{"destroy"}, snapshotArgs(datasets, snapshotName, recursive)...)
+}
+
+func snapshotArgs(datasets []string, snapshotName string, recursive bool) (args []string) {
 	if recursive {
 		args = append(args, "-r")
 	}
