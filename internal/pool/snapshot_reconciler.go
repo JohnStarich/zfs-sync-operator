@@ -157,27 +157,15 @@ func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool P
 	if len(snapshot.Spec.Datasets) == 0 {
 		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
 	}
-	var recursiveDatasets, singularDatasets []string // Prepare snapshot's matching datasets
 	for _, dataset := range snapshot.Spec.Datasets {
 		if !pool.validDatasetName(dataset.Name) {
 			return "", "", errors.Errorf("invalid dataset selector name %q: name must start with pool name %s", dataset.Name, pool.Spec.Name)
 		}
-		switch {
-		case dataset.Recursive == nil:
-			singularDatasets = append(singularDatasets, dataset.Name)
-		case len(dataset.Recursive.SkipChildren) > 0:
-			childDatasets, err := r.childDatasets(ctx, dataset.Name, connection)
-			if err != nil {
-				return "", "", errors.WithMessage(err, "failed to fetch child datasets")
-			}
-			for _, child := range childDatasets {
-				if !slices.Contains(dataset.Recursive.SkipChildren, child) {
-					recursiveDatasets = append(recursiveDatasets, child)
-				}
-			}
-		default:
-			recursiveDatasets = append(recursiveDatasets, dataset.Name)
-		}
+	}
+
+	recursiveDatasets, singularDatasets, err := r.matchDatasets(ctx, snapshot, connection)
+	if err != nil {
+		return "", "", err
 	}
 
 	if snapshot.DeletionTimestamp != nil {
@@ -234,6 +222,28 @@ func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool P
 	}
 
 	return SnapshotCompleted, "", nil
+}
+
+func (r *SnapshotReconciler) matchDatasets(ctx context.Context, snapshot *PoolSnapshot, connection *Connection) (recursive, singular []string, err error) {
+	for _, dataset := range snapshot.Spec.Datasets {
+		switch {
+		case dataset.Recursive == nil:
+			singular = append(singular, dataset.Name)
+		case len(dataset.Recursive.SkipChildren) > 0:
+			childDatasets, err := r.childDatasets(ctx, dataset.Name, connection)
+			if err != nil {
+				return nil, nil, errors.WithMessage(err, "failed to fetch child datasets")
+			}
+			for _, child := range childDatasets {
+				if !slices.Contains(dataset.Recursive.SkipChildren, child) {
+					recursive = append(recursive, child)
+				}
+			}
+		default:
+			recursive = append(recursive, dataset.Name)
+		}
+	}
+	return recursive, singular, nil
 }
 
 func createSnapshotCommand(datasets []string, snapshotName string, recursive bool) (name string, args []string) {
