@@ -107,6 +107,7 @@ func (r *Reconciler) reconcile(ctx context.Context, pool *Pool) error {
 func (r *Reconciler) reconcileWithSSHClient(ctx context.Context, pool *Pool, sshClient *ssh.Client) error {
 	logger := log.FromContext(ctx)
 	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
+	// TODO make running commands simpler than session management
 	sshSession, err := sshClient.NewSession()
 	if err != nil {
 		return err
@@ -137,6 +138,7 @@ func (r *Reconciler) reconcileWithSSHClient(ctx context.Context, pool *Pool, ssh
 		}
 		now := r.timeNow()
 		for _, interval := range intervals {
+			// TODO set requeue after time for next soonest snapshot
 			var allSnapshots PoolSnapshotList
 			err := r.client.List(ctx, &allSnapshots, &client.ListOptions{
 				LabelSelector: labels.SelectorFromSet(labels.Set{snapshotIntervalLabel: interval.Name}),
