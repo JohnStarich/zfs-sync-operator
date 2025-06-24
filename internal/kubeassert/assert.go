@@ -1,3 +1,4 @@
+// Package kubeassert provides test equality assertions for Kubernetes resources
 package kubeassert
 
 import (
@@ -47,6 +48,8 @@ func EqualList[List ~[]Value, Value client.Object](t testingT, expected, actual 
 }
 
 // Equal asserts Kubernetes resource actual is equal to expected.
+// This assertion skips checks on UIDs, ResourceVersions, and other fields that can't be predicted before the test is run.
+//
 // If expected's Status is nil, actual's status is ignored.
 func Equal[Value client.Object](t testingT, expected, actual Value) {
 	tryHelper(t)()

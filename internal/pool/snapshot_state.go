@@ -1,7 +1,9 @@
 package pool
 
+// SnapshotState represents all snapshot lifecycle states
 type SnapshotState string
 
+// Snapshot lifecycle states
 const (
 	SnapshotCompleted = SnapshotState("Completed") // Pool snapshot across datasets completed successfully.
 	SnapshotError     = SnapshotState("Error")     // Pool snapshot encountered an error.

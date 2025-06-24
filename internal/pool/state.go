@@ -2,8 +2,10 @@ package pool
 
 import "strings"
 
+// State represents all pool lifecycle states
 type State string
 
+// Pool lifecycle states
 const (
 	Degraded = State("Degraded") // ZFS reported a pool state of DEGRADED
 	Error    = State("Error")    // The operator failed to determine pool state
@@ -20,6 +22,9 @@ func stateFromStateField(stateField string) State {
 	switch state {
 	case Online, Degraded, Faulted:
 		return state
+	case Error, NotFound, Unknown:
+		// Not real zpool states
+		return Unknown
 	default:
 		return Unknown
 	}

@@ -57,18 +57,22 @@ func testTime() time.Time {
 	return time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 }
 
+// TestRelativeTime returns the test's clock time in UTC after adding 'add'
 func TestRelativeTime(add time.Duration) time.Time {
 	return testTime().UTC().Add(add)
 }
 
+// TestRoundedRelativeTime returns the test's clock time in UTC after rounding to 'round' and then adding 'add'
 func TestRoundedRelativeTime(round, add time.Duration) time.Time {
 	return testTime().UTC().Round(round).Add(add)
 }
 
+// TestRelativeMetaV1Time is like TestRelativeTime but returns a [metav1.Time] in local time
 func TestRelativeMetaV1Time(add time.Duration) metav1.Time {
 	return metav1.Time{Time: TestRelativeTime(add).Local()}
 }
 
+// TestRoundedRelativeMetaV1Time is like TestRoundedRelativeTime but returns a [metav1.Time] in local time
 func TestRoundedRelativeMetaV1Time(round, add time.Duration) metav1.Time {
 	return metav1.Time{Time: TestRoundedRelativeTime(round, add).Local()}
 }

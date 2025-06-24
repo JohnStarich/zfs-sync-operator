@@ -9,6 +9,8 @@ import (
 
 // PoolSnapshot represents a set of ZFS dataset snapshots in a Pool.
 // Pools create new PoolSnapshots on a schedule, and delete old ones as they age out.
+//
+//nolint:revive // The naming scheme XXXSnapshot is required to perform a Watch.
 type PoolSnapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -27,17 +29,24 @@ type SnapshotSpec struct {
 	SnapshotSpecTemplate `json:",inline"`
 }
 
+// SnapshotSpecTemplate defines a set of pool datasets to include in a PoolSnapshot
 type SnapshotSpecTemplate struct {
 	Datasets []DatasetSelector `json:"datasets"` // The ZFS datasets to snapshot
 }
 
+// DatasetSelector selects a ZFS dataset (filesystem or volume).
+// If Recursive is not nil, then the dataset is snapshotted recursively.
 type DatasetSelector struct {
 	Name      string                `json:"name"`
 	Recursive *RecursiveDatasetSpec `json:"recursive,omitempty"`
 }
 
+// RecursiveDatasetSpec configures a snapshot to run recursively, i.e. 'zfs snapshot -r'.
 type RecursiveDatasetSpec struct {
 	// Skips the given immediate child dataset names. Names are the fully-qualified names, including their parent dataset names.
+	// This dynamically looks up children at snapshot time, filters out these children, then recursively snapshots each unmatched child.
+	//
+	// In practice this skips known children that should not be backed up, like another unmanaged backup, and automatically includes new children as they're created.
 	SkipChildren []string `json:"skipChildren,omitempty"`
 }
 

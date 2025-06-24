@@ -93,6 +93,7 @@ func registerSnapshotReconciler(ctx context.Context, manager manager.Manager, ti
 	return nil
 }
 
+// Reconcile implements [reconcile.Reconciler]
 func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("checking request", "request", request)

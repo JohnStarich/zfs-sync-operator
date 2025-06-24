@@ -150,7 +150,7 @@ func (r *Reconciler) reconcileWithSSHClient(ctx context.Context, pool *Pool, ssh
 			if err != nil {
 				return errors.WithMessagef(err, "failed to retrieve PoolSnapshots for pool %s on interval %s", pool.Name, interval.Name)
 			}
-			if err := SortSnapshotsByDesiredTimestamp(allSnapshots.Items); err != nil {
+			if err := SortScheduledSnapshots(allSnapshots.Items); err != nil {
 				return err
 			}
 
@@ -258,7 +258,10 @@ func unsignedLen[Value any](values []Value) uint {
 	return uint(len(values))
 }
 
-func SortSnapshotsByDesiredTimestamp(snapshots []*PoolSnapshot) error {
+// SortScheduledSnapshots sorts snapshots by their scheduled timestamp.
+// This only applies to PoolSnapshots created by a Pool's snapshots configuration.
+// If any snapshot is encountered with an invalid timestamp, the sort fails.
+func SortScheduledSnapshots(snapshots []*PoolSnapshot) error {
 	var sortErr error
 	slices.SortFunc(snapshots, func(a, b *PoolSnapshot) int {
 		annotationA, annotationB := a.Annotations[snapshotTimestampAnnotation], b.Annotations[snapshotTimestampAnnotation]

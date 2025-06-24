@@ -12,6 +12,7 @@ import (
 //go:embed crd/*
 var configFS embed.FS
 
+// CustomResourceDefinitions parses all CRD yaml files into [apiextensionsv1.CustomResourceDefinition]
 func CustomResourceDefinitions() ([]*apiextensionsv1.CustomResourceDefinition, error) {
 	var crds []*apiextensionsv1.CustomResourceDefinition
 	err := fs.WalkDir(configFS, ".", func(path string, d fs.DirEntry, err error) error {

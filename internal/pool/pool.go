@@ -91,6 +91,7 @@ type SnapshotsSpec struct {
 	Template  SnapshotSpecTemplate   `json:"template"`
 }
 
+// SnapshotIntervalSpec configures a Pool snapshot interval, or schedule
 type SnapshotIntervalSpec struct {
 	Name         string          `json:"name"`         // The name of this interval. e.g. hourly, daily, weekly, monthly, yearly
 	HistoryLimit uint            `json:"historyLimit"` // Keep N snapshots for this snapshot interval. Discard old snapshots when new ones become available.
