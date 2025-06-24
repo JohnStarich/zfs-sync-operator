@@ -186,8 +186,8 @@ type PoolList struct {
 // DeepCopyObject implements [ctrlruntime.Object]
 func (l *PoolList) DeepCopyObject() ctrlruntime.Object { return baddeepcopy.DeepCopy(l) }
 
-// WithSession starts an SSH session (optionally over WireGuard) using p's Spec, runs do with the session, then tears everything down
-func (p *Pool) WithSession(ctx context.Context, client ctrlclient.Client, do func(*ssh.Session) error) (returnedErr error) {
+// WithConnection starts an SSH session (optionally over WireGuard) using p's Spec, runs do with the session, then tears everything down
+func (p *Pool) WithConnection(ctx context.Context, client ctrlclient.Client, do func(*ssh.Client) error) (returnedErr error) {
 	logger := log.FromContext(ctx)
 
 	if p.Spec == nil || p.Spec.SSH == nil {
@@ -240,12 +240,7 @@ func (p *Pool) WithSession(ctx context.Context, client ctrlclient.Client, do fun
 	}
 	defer tryCleanup(currentLine(), &returnedErr, sshConn.Close)
 	sshClient := ssh.NewClient(sshConn, channels, requests)
-	session, err := sshClient.NewSession()
-	if err != nil {
-		return err
-	}
-	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
-	return do(session)
+	return do(sshClient)
 }
 
 func currentLine() string {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
@@ -144,15 +145,15 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 
 	var state SnapshotState
 	var reason string
-	err := pool.WithSession(ctx, r.client, func(sshSession *ssh.Session) error {
+	err := pool.WithConnection(ctx, r.client, func(sshClient *ssh.Client) error {
 		var err error
-		state, reason, err = r.reconcileWithSSH(ctx, pool, snapshot, sshSession)
+		state, reason, err = r.reconcileWithSSH(ctx, pool, snapshot, sshClient)
 		return err
 	})
 	return state, reason, err
 }
 
-func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, snapshot *PoolSnapshot, sshSession *ssh.Session) (SnapshotState, string, error) {
+func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, snapshot *PoolSnapshot, sshClient *ssh.Client) (SnapshotState, string, error) {
 	if len(snapshot.Spec.Datasets) == 0 {
 		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
 	}
@@ -161,11 +162,21 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 		if !pool.validDatasetName(dataset.Name) {
 			return "", "", errors.Errorf("invalid dataset selector name %q: name must start with pool name %s", dataset.Name, pool.Spec.Name)
 		}
-		if dataset.Recursive == nil {
+		switch {
+		case dataset.Recursive == nil:
 			singularDatasets = append(singularDatasets, dataset.Name)
-		} else {
+		case len(dataset.Recursive.SkipChildren) > 0:
+			childDatasets, err := r.childDatasets(dataset.Name, sshClient)
+			if err != nil {
+				return "", "", errors.WithMessage(err, "failed to fetch child datasets")
+			}
+			for _, child := range childDatasets {
+				if !slices.Contains(dataset.Recursive.SkipChildren, child) {
+					recursiveDatasets = append(recursiveDatasets, child)
+				}
+			}
+		default:
 			recursiveDatasets = append(recursiveDatasets, dataset.Name)
-			// TODO handle skipChildren
 		}
 	}
 
@@ -176,6 +187,10 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 		if len(recursiveDatasets) > 0 {
 			name, args := destroySnapshotCommand(recursiveDatasets, snapshot.Name, true)
 			command := safelyFormatCommand(name, args...)
+			sshSession, err := sshClient.NewSession()
+			if err != nil {
+				return "", "", errors.WithMessage(err, "failed to start ssh session")
+			}
 			output, err := sshSession.CombinedOutput(command)
 			output = bytes.TrimSpace(output)
 			if err != nil {
@@ -185,6 +200,10 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 		if len(singularDatasets) > 0 {
 			name, args := destroySnapshotCommand(singularDatasets, snapshot.Name, false)
 			command := safelyFormatCommand(name, args...)
+			sshSession, err := sshClient.NewSession()
+			if err != nil {
+				return "", "", errors.WithMessage(err, "failed to start ssh session")
+			}
 			output, err := sshSession.CombinedOutput(command)
 			output = bytes.TrimSpace(output)
 			if err != nil {
@@ -214,6 +233,10 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 	if len(recursiveDatasets) > 0 {
 		name, args := createSnapshotCommand(recursiveDatasets, snapshot.Name, true)
 		command := safelyFormatCommand(name, args...)
+		sshSession, err := sshClient.NewSession()
+		if err != nil {
+			return "", "", errors.WithMessage(err, "failed to start ssh session")
+		}
 		output, err := sshSession.CombinedOutput(command)
 		output = bytes.TrimSpace(output)
 		if err != nil {
@@ -223,6 +246,10 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 	if len(singularDatasets) > 0 {
 		name, args := createSnapshotCommand(singularDatasets, snapshot.Name, false)
 		command := safelyFormatCommand(name, args...)
+		sshSession, err := sshClient.NewSession()
+		if err != nil {
+			return "", "", errors.WithMessage(err, "failed to start ssh session")
+		}
 		output, err := sshSession.CombinedOutput(command)
 		output = bytes.TrimSpace(output)
 		if err != nil {
@@ -261,4 +288,32 @@ func (r *SnapshotReconciler) matchingSnapshots(ctx context.Context, pool *Pool) 
 		return nil, errors.WithMessage(err, "failed to list matching pool snapshots")
 	}
 	return snapshots.Items, nil
+}
+
+func (r *SnapshotReconciler) childDatasets(datasetName string, sshClient *ssh.Client) ([]string, error) {
+	command := safelyFormatCommand(
+		"/usr/sbin/zfs", "get",
+		"-H",                      // Machine parseable format
+		"-t", "filesystem,volume", // Only snapshottable types
+		"-r", "-d", "1", // Recurse with a max depth of 1, only get immediate children
+		"-o", "name", // Only output the dataset name column
+		"name",      // Only request the name property
+		datasetName, // The parent dataset
+	)
+	sshSession, err := sshClient.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	output, err := sshSession.CombinedOutput(command)
+	output = bytes.TrimSpace(output)
+	outputStr := string(output)
+	if err != nil {
+		return nil, errors.WithMessage(err, outputStr)
+	}
+	zfsGetItems := strings.Split(outputStr, "\n")
+	zfsGetItems = slices.DeleteFunc(zfsGetItems, func(name string) bool {
+		// 'zfs get -r -d 1 datasetname' includes the parent in the returned list. Filter it out.
+		return name == datasetName
+	})
+	return zfsGetItems, nil
 }

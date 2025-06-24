@@ -37,7 +37,7 @@ type DatasetSelector struct {
 }
 
 type RecursiveDatasetSpec struct {
-	// Skips the given child dataset names. Names are the fully-qualified names, including their parent dataset names.
+	// Skips the given immediate child dataset names. Names are the fully-qualified names, including their parent dataset names.
 	SkipChildren []string `json:"skipChildren,omitempty"`
 }
 

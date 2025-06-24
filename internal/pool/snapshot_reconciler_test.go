@@ -57,7 +57,7 @@ func TestSnapshot(t *testing.T) {
 			},
 		},
 		{
-			description: "happy path - slow reconcile shows Running",
+			description: "slow reconcile shows Running",
 			execResults: map[string]*ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
@@ -79,7 +79,7 @@ func TestSnapshot(t *testing.T) {
 			},
 		},
 		{
-			description: "happy path - multiple datasets",
+			description: "multiple datasets",
 			execResults: map[string]*ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
@@ -101,7 +101,7 @@ func TestSnapshot(t *testing.T) {
 			},
 		},
 		{
-			description: "happy path - multiple recursive datasets",
+			description: "multiple recursive datasets",
 			execResults: map[string]*ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
@@ -119,6 +119,38 @@ func TestSnapshot(t *testing.T) {
 						{
 							Name:      fmt.Sprintf("%s/some-dataset-2", someZPoolName),
 							Recursive: &zfspool.RecursiveDatasetSpec{},
+						},
+					},
+				},
+			},
+			expectStatus: &zfspool.SnapshotStatus{
+				State:  zfspool.SnapshotCompleted,
+				Reason: "",
+			},
+		},
+		{
+			description: "recursive datasets that skip specific child datasets",
+			execResults: map[string]*ssh.TestExecResult{
+				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
+				`/usr/sbin/zfs get -H -t filesystem\,volume -r -d 1 -o name name ` + someZPoolName: {Stdout: fmt.Appendf(nil, `
+%[1]s
+%[1]s/some-dataset-1
+%[1]s/some-dataset-2
+%[1]s/some-dataset-3
+`, someZPoolName), ExitCode: 0},
+				fmt.Sprintf(`/usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-3\@%[2]s`, someZPoolName, someSnapshotName): {ExitCode: 0},
+			},
+			snapshotSpec: zfspool.SnapshotSpec{
+				Pool: corev1.LocalObjectReference{Name: somePoolName},
+				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+					Datasets: []zfspool.DatasetSelector{
+						{
+							Name: someZPoolName,
+							Recursive: &zfspool.RecursiveDatasetSpec{
+								SkipChildren: []string{
+									fmt.Sprintf("%s/some-dataset-2", someZPoolName),
+								},
+							},
 						},
 					},
 				},

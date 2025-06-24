@@ -99,15 +99,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 func (r *Reconciler) reconcile(ctx context.Context, pool *Pool) error {
 	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
-	return pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
-		return r.reconcileWithSSHSession(ctx, pool, session)
+	return pool.WithConnection(ctx, r.client, func(client *ssh.Client) error {
+		return r.reconcileWithSSHClient(ctx, pool, client)
 	})
 }
 
-func (r *Reconciler) reconcileWithSSHSession(ctx context.Context, pool *Pool, session *ssh.Session) error {
+func (r *Reconciler) reconcileWithSSHClient(ctx context.Context, pool *Pool, sshClient *ssh.Client) error {
 	logger := log.FromContext(ctx)
 	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
-	zpoolStatus, err := session.CombinedOutput(command)
+	sshSession, err := sshClient.NewSession()
+	if err != nil {
+		return err
+	}
+	zpoolStatus, err := sshSession.CombinedOutput(command)
 	zpoolStatus = bytes.TrimSpace(zpoolStatus)
 	if err != nil {
 		if bytes.HasSuffix(zpoolStatus, []byte(": no such pool")) {
