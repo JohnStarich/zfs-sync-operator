@@ -39,17 +39,17 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 		return err
 	}
 
-	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, ".spec.source.name", func(o client.Object) []string {
+	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, sourceProperty, func(o client.Object) []string {
 		return []string{o.(*Backup).Spec.Source.Name}
 	})
 	if err != nil {
-		return errors.WithMessage(err, "failed to index Backup.spec.source.name")
+		return errors.WithMessagef(err, "failed to index Backup %s", sourceProperty)
 	}
-	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, ".spec.destination.name", func(o client.Object) []string {
+	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, destinationProperty, func(o client.Object) []string {
 		return []string{o.(*Backup).Spec.Destination.Name}
 	})
 	if err != nil {
-		return errors.WithMessage(err, "failed to index Backup.spec.destination.name")
+		return errors.WithMessagef(err, "failed to index Backup %s", destinationProperty)
 	}
 	if err := ctrl.Watch(source.Kind(
 		manager.GetCache(),
