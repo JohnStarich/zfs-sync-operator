@@ -10,7 +10,6 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -146,15 +145,15 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 
 	var state SnapshotState
 	var reason string
-	err := pool.WithConnection(ctx, r.client, func(sshClient *ssh.Client) error {
+	err := pool.WithConnection(ctx, r.client, func(connection *Connection) error {
 		var err error
-		state, reason, err = r.reconcileWithSSH(ctx, pool, snapshot, sshClient)
+		state, reason, err = r.reconcileWithConnection(ctx, pool, snapshot, connection)
 		return err
 	})
 	return state, reason, err
 }
 
-func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, snapshot *PoolSnapshot, sshClient *ssh.Client) (SnapshotState, string, error) {
+func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool Pool, snapshot *PoolSnapshot, connection *Connection) (SnapshotState, string, error) {
 	if len(snapshot.Spec.Datasets) == 0 {
 		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
 	}
@@ -167,7 +166,7 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 		case dataset.Recursive == nil:
 			singularDatasets = append(singularDatasets, dataset.Name)
 		case len(dataset.Recursive.SkipChildren) > 0:
-			childDatasets, err := r.childDatasets(dataset.Name, sshClient)
+			childDatasets, err := r.childDatasets(ctx, dataset.Name, connection)
 			if err != nil {
 				return "", "", errors.WithMessage(err, "failed to fetch child datasets")
 			}
@@ -187,28 +186,16 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 		}
 		if len(recursiveDatasets) > 0 {
 			name, args := destroySnapshotCommand(recursiveDatasets, snapshot.Name, true)
-			command := safelyFormatCommand(name, args...)
-			sshSession, err := sshClient.NewSession()
+			_, err := connection.ExecCombinedOutput(ctx, name, args...)
 			if err != nil {
-				return "", "", errors.WithMessage(err, "failed to start ssh session")
-			}
-			output, err := sshSession.CombinedOutput(command)
-			output = bytes.TrimSpace(output)
-			if err != nil {
-				return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+				return "", "", err
 			}
 		}
 		if len(singularDatasets) > 0 {
 			name, args := destroySnapshotCommand(singularDatasets, snapshot.Name, false)
-			command := safelyFormatCommand(name, args...)
-			sshSession, err := sshClient.NewSession()
+			_, err := connection.ExecCombinedOutput(ctx, name, args...)
 			if err != nil {
-				return "", "", errors.WithMessage(err, "failed to start ssh session")
-			}
-			output, err := sshSession.CombinedOutput(command)
-			output = bytes.TrimSpace(output)
-			if err != nil {
-				return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+				return "", "", err
 			}
 		}
 
@@ -233,28 +220,16 @@ func (r *SnapshotReconciler) reconcileWithSSH(ctx context.Context, pool Pool, sn
 
 	if len(recursiveDatasets) > 0 {
 		name, args := createSnapshotCommand(recursiveDatasets, snapshot.Name, true)
-		command := safelyFormatCommand(name, args...)
-		sshSession, err := sshClient.NewSession()
+		_, err := connection.ExecCombinedOutput(ctx, name, args...)
 		if err != nil {
-			return "", "", errors.WithMessage(err, "failed to start ssh session")
-		}
-		output, err := sshSession.CombinedOutput(command)
-		output = bytes.TrimSpace(output)
-		if err != nil {
-			return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+			return "", "", err
 		}
 	}
 	if len(singularDatasets) > 0 {
 		name, args := createSnapshotCommand(singularDatasets, snapshot.Name, false)
-		command := safelyFormatCommand(name, args...)
-		sshSession, err := sshClient.NewSession()
+		_, err := connection.ExecCombinedOutput(ctx, name, args...)
 		if err != nil {
-			return "", "", errors.WithMessage(err, "failed to start ssh session")
-		}
-		output, err := sshSession.CombinedOutput(command)
-		output = bytes.TrimSpace(output)
-		if err != nil {
-			return "", "", errors.Wrapf(err, `failed to run '%s': %s`, command, string(output))
+			return "", "", err
 		}
 	}
 
@@ -291,8 +266,9 @@ func (r *SnapshotReconciler) matchingSnapshots(ctx context.Context, pool *Pool) 
 	return snapshots.Items, nil
 }
 
-func (r *SnapshotReconciler) childDatasets(datasetName string, sshClient *ssh.Client) ([]string, error) {
-	command := safelyFormatCommand(
+func (r *SnapshotReconciler) childDatasets(ctx context.Context, datasetName string, connection *Connection) ([]string, error) {
+	output, err := connection.ExecCombinedOutput(
+		ctx,
 		"/usr/sbin/zfs", "get",
 		"-H",                      // Machine parseable format
 		"-t", "filesystem,volume", // Only snapshottable types
@@ -301,11 +277,6 @@ func (r *SnapshotReconciler) childDatasets(datasetName string, sshClient *ssh.Cl
 		"name",      // Only request the name property
 		datasetName, // The parent dataset
 	)
-	sshSession, err := sshClient.NewSession()
-	if err != nil {
-		return nil, err
-	}
-	output, err := sshSession.CombinedOutput(command)
 	output = bytes.TrimSpace(output)
 	outputStr := string(output)
 	if err != nil {

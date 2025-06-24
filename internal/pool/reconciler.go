@@ -4,13 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -99,30 +99,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 func (r *Reconciler) reconcile(ctx context.Context, pool *Pool) error {
 	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
-	return pool.WithConnection(ctx, r.client, func(client *ssh.Client) error {
-		return r.reconcileWithSSHClient(ctx, pool, client)
+	return pool.WithConnection(ctx, r.client, func(connection *Connection) error {
+		return r.reconcileWithConnection(ctx, pool, connection)
 	})
 }
 
-func (r *Reconciler) reconcileWithSSHClient(ctx context.Context, pool *Pool, sshClient *ssh.Client) error {
+func (r *Reconciler) reconcileWithConnection(ctx context.Context, pool *Pool, connection *Connection) error {
 	logger := log.FromContext(ctx)
-	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
-	// TODO make running commands simpler than session management
-	sshSession, err := sshClient.NewSession()
-	if err != nil {
-		return err
-	}
-	zpoolStatus, err := sshSession.CombinedOutput(command)
-	zpoolStatus = bytes.TrimSpace(zpoolStatus)
+	zpoolStatus, err := connection.ExecCombinedOutput(ctx, "/usr/sbin/zpool", "status", pool.Spec.Name)
 	if err != nil {
 		if bytes.HasSuffix(zpoolStatus, []byte(": no such pool")) {
 			pool.Status = &Status{
 				State:  NotFound,
-				Reason: string(zpoolStatus),
+				Reason: fmt.Sprintf("zpool with name '%s' could not be found", pool.Spec.Name),
 			}
 			return r.client.Status().Update(ctx, pool)
 		}
-		return errors.Wrapf(err, `failed to run '%s': %s`, command, string(zpoolStatus))
+		return err
 	}
 	pool.Status = &Status{
 		State: stateFromStateField(stateFieldFromZpoolStatus(zpoolStatus)),

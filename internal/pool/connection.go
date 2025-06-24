@@ -1,11 +1,13 @@
 package pool
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"runtime"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
@@ -18,8 +20,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// Connection executes commands over SSH on a ZFS Pool.
+// If WireGuard is required, the SSH connection is tunneled through the VPN.
+type Connection struct {
+	client *ssh.Client
+}
+
 // WithConnection starts an SSH session (optionally over WireGuard) using p's Spec, runs do with the session, then tears everything down
-func (p *Pool) WithConnection(ctx context.Context, client ctrlclient.Client, do func(*ssh.Client) error) (returnedErr error) {
+func (p *Pool) WithConnection(ctx context.Context, client ctrlclient.Client, do func(*Connection) error) (returnedErr error) {
 	logger := log.FromContext(ctx)
 
 	if p.Spec == nil || p.Spec.SSH == nil {
@@ -72,7 +80,9 @@ func (p *Pool) WithConnection(ctx context.Context, client ctrlclient.Client, do 
 	}
 	defer tryCleanup(currentLine(), &returnedErr, sshConn.Close)
 	sshClient := ssh.NewClient(sshConn, channels, requests)
-	return do(sshClient)
+	return do(&Connection{
+		client: sshClient,
+	})
 }
 
 func currentLine() string {
@@ -119,7 +129,7 @@ type contextDialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (net.Conn, error) {
+func (p *Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (net.Conn, error) {
 	logger := log.FromContext(ctx)
 	sshAddress := p.Spec.SSH.Address
 
@@ -162,4 +172,19 @@ func (p Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) (
 
 	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress)
 	return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
+}
+
+// ExecCombinedOutput executes the named command with its arguments, captures the output, and returns the results
+func (c *Connection) ExecCombinedOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
+	session, err := c.client.NewSession()
+	if err != nil {
+		return nil, errors.WithMessagef(err, "failed to start session for exec (%s %s)", name, strings.Join(args, " "))
+	}
+	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
+	output, err := session.CombinedOutput(safelyFormatCommand(name, args...))
+	output = bytes.TrimSpace(output)
+	if err != nil {
+		return output, errors.WithMessagef(err, "command '%s %s' failed with output: %s", name, strings.Join(args, " "), string(output))
+	}
+	return output, nil
 }
