@@ -177,19 +177,12 @@ func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool P
 		if !slices.Contains(snapshot.Finalizers, snapshotDestroyFinalizer) {
 			return snapshot.Status.State, snapshot.Status.Reason, 0, nil
 		}
-		if len(recursiveDatasets) > 0 {
-			name, args := destroySnapshotCommand(recursiveDatasets, snapshot.Name, true)
-			_, err := connection.ExecCombinedOutput(ctx, name, args...)
-			if err != nil {
-				return "", "", 0, err
-			}
+		const zfsDestroyCommand = "destroy"
+		if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone(recursiveDatasets, snapshot.Name, true)); err != nil {
+			return "", "", 0, err
 		}
-		if len(singularDatasets) > 0 {
-			name, args := destroySnapshotCommand(singularDatasets, snapshot.Name, false)
-			_, err := connection.ExecCombinedOutput(ctx, name, args...)
-			if err != nil {
-				return "", "", 0, err
-			}
+		if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone(singularDatasets, snapshot.Name, false)); err != nil {
+			return "", "", 0, err
 		}
 
 		snapshot.Finalizers = slices.DeleteFunc(snapshot.Finalizers, func(s string) bool { return s == snapshotDestroyFinalizer })
@@ -216,21 +209,14 @@ func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool P
 		}
 	}
 
-	if len(recursiveDatasets) > 0 {
-		name, args := createSnapshotCommand(recursiveDatasets, snapshot.Name, true)
-		_, err := connection.ExecCombinedOutput(ctx, name, args...)
-		if err != nil {
-			logger.Error(err, "Failed to snapshot datasets recursively")
-			return SnapshotError, err.Error(), requeueAfter, nil
-		}
+	const zfsSnapshotCommand = "snapshot"
+	if err := runZFSCommandIfArgs(ctx, connection, zfsSnapshotCommand, formatSnapshotArgsOrNone(recursiveDatasets, snapshot.Name, true)); err != nil {
+		logger.Error(err, "Failed to snapshot datasets recursively")
+		return SnapshotError, err.Error(), requeueAfter, nil
 	}
-	if len(singularDatasets) > 0 {
-		name, args := createSnapshotCommand(singularDatasets, snapshot.Name, false)
-		_, err := connection.ExecCombinedOutput(ctx, name, args...)
-		if err != nil {
-			logger.Error(err, "Failed to snapshot datasets")
-			return SnapshotError, err.Error(), requeueAfter, nil
-		}
+	if err := runZFSCommandIfArgs(ctx, connection, zfsSnapshotCommand, formatSnapshotArgsOrNone(singularDatasets, snapshot.Name, false)); err != nil {
+		logger.Error(err, "Failed to snapshot datasets")
+		return SnapshotError, err.Error(), requeueAfter, nil
 	}
 
 	return SnapshotCompleted, "", 0, nil
@@ -258,20 +244,24 @@ func (r *SnapshotReconciler) matchDatasets(ctx context.Context, snapshot *PoolSn
 	return recursive, singular, nil
 }
 
-func createSnapshotCommand(datasets []string, snapshotName string, recursive bool) (name string, args []string) {
-	return "/usr/sbin/zfs", append([]string{"snapshot"}, snapshotArgs(datasets, snapshotName, recursive)...)
+func runZFSCommandIfArgs(ctx context.Context, connection *Connection, subcommand string, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	commandArgs := append([]string{subcommand}, args...)
+	_, err := connection.ExecCombinedOutput(ctx, "/usr/sbin/zfs", commandArgs...)
+	return err
 }
 
-func destroySnapshotCommand(datasets []string, snapshotName string, recursive bool) (name string, args []string) {
-	return "/usr/sbin/zfs", append([]string{"destroy"}, snapshotArgs(datasets, snapshotName, recursive)...)
-}
-
-func snapshotArgs(datasets []string, snapshotName string, recursive bool) (args []string) {
+func formatSnapshotArgsOrNone(datasets []string, snapshotName string, recursive bool) (argsOrNone []string) {
+	if len(datasets) == 0 {
+		return nil // none
+	}
 	if recursive {
-		args = append(args, "-r")
+		argsOrNone = append(argsOrNone, "-r")
 	}
 	for _, dataset := range datasets {
-		args = append(args, fmt.Sprintf("%s@%s", dataset, snapshotName))
+		argsOrNone = append(argsOrNone, fmt.Sprintf("%s@%s", dataset, snapshotName))
 	}
 	return
 }
