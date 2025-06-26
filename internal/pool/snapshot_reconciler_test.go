@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
@@ -167,7 +168,7 @@ func TestSnapshot(t *testing.T) {
 			},
 			snapshotSpec: zfspool.SnapshotSpec{
 				Pool:     corev1.LocalObjectReference{Name: somePoolName},
-				Deadline: &metav1.Time{Time: operator.TestRelativeTime(-1 * time.Hour)},
+				Deadline: &metav1.Time{Time: clock.NewTest().RelativeTime(-1 * time.Hour)},
 				SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 					Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", someZPoolName)}},
 				},

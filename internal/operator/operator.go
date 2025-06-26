@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
+	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
@@ -76,10 +77,10 @@ type Config struct {
 	LogHandler         slog.Handler
 	MetricsPort        string
 	Namespace          string
-	idempotentMetrics  bool             // disables safety checks for double metrics registrations
-	maxSessionWait     time.Duration    // allows tests to shorten wait times for faster pass/fail results
-	onlyWatchNamespace string           // in tests only, restrict watches to this namespace
-	timeNow            func() time.Time // in tests only, control time for more consistent, assertable results
+	clock              clock.Clock   // in tests only, control time for more consistent, assertable results
+	idempotentMetrics  bool          // disables safety checks for double metrics registrations
+	maxSessionWait     time.Duration // allows tests to shorten wait times for faster pass/fail results
+	onlyWatchNamespace string        // in tests only, restrict watches to this namespace
 }
 
 // New returns a new [Operator]
@@ -92,8 +93,8 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if c.maxSessionWait == 0 {
 		c.maxSessionWait = 1 * time.Minute
 	}
-	if c.timeNow == nil {
-		c.timeNow = time.Now
+	if c.clock == nil {
+		c.clock = &clock.Real{}
 	}
 
 	cacheOptions := cache.Options{}
@@ -125,7 +126,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err := backup.RegisterReconciler(ctx, mgr); err != nil {
 		return nil, err
 	}
-	if err := pool.RegisterReconciler(ctx, mgr, c.maxSessionWait, c.timeNow); err != nil {
+	if err := pool.RegisterReconciler(ctx, mgr, c.maxSessionWait, c.clock); err != nil {
 		return nil, err
 	}
 

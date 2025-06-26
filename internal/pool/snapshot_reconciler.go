@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/fields"
@@ -24,8 +25,8 @@ import (
 
 // SnapshotReconciler reconciles PoolSnapshot resources to create a set of ZFS snapshots across the whole pool
 type SnapshotReconciler struct {
-	client  client.Client
-	timeNow func() time.Time
+	client client.Client
+	clock  clock.Clock
 }
 
 const (
@@ -34,10 +35,10 @@ const (
 )
 
 // registerSnapshotReconciler registers a PoolSnapshot reconciler with manager
-func registerSnapshotReconciler(ctx context.Context, manager manager.Manager, timeNow func() time.Time) error {
+func registerSnapshotReconciler(ctx context.Context, manager manager.Manager, clock clock.Clock) error {
 	reconciler := &SnapshotReconciler{
-		client:  manager.GetClient(),
-		timeNow: timeNow,
+		client: manager.GetClient(),
+		clock:  clock,
 	}
 
 	ctrl, err := controller.New("poolsnapshot", manager, controller.Options{
@@ -100,7 +101,7 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	if err := r.client.Get(ctx, request.NamespacedName, &snapshot); err != nil {
 		return reconcile.Result{}, err
 	}
-	state, reason, reconcileErr := r.reconcile(ctx, &snapshot)
+	state, reason, requeueAfter, reconcileErr := r.reconcile(ctx, &snapshot)
 	if reconcileErr == nil {
 		logger.Info("poolsnapshot reconciled successfully", "state", state)
 		snapshot.Status = &SnapshotStatus{
@@ -117,92 +118,101 @@ func (r *SnapshotReconciler) Reconcile(ctx context.Context, request reconcile.Re
 	if err := r.client.Status().Update(ctx, &snapshot); err != nil {
 		return reconcile.Result{}, errors.Wrap(err, "failed to update status")
 	}
-	return reconcile.Result{}, reconcileErr
+	return reconcile.Result{
+		RequeueAfter: requeueAfter,
+	}, reconcileErr
 }
 
-func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapshot) (SnapshotState, string, error) {
+func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapshot) (SnapshotState, string, time.Duration, error) {
 	if snapshot.Status == nil { // Guard against nil status
 		snapshot.Status = &SnapshotStatus{State: SnapshotPending}
 	}
 	if snapshot.DeletionTimestamp == nil && snapshot.Status.State == SnapshotCompleted || snapshot.Status.State == SnapshotFailed {
-		return snapshot.Status.State, snapshot.Status.Reason, nil
+		return snapshot.Status.State, snapshot.Status.Reason, 0, nil
 	}
 
 	var pool Pool
 	if err := r.client.Get(ctx, client.ObjectKey{Name: snapshot.Spec.Pool.Name, Namespace: snapshot.Namespace}, &pool); err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
 	if pool.Status == nil {
-		return SnapshotError, "pool is not ready", nil
+		return SnapshotError, "pool is not ready", 0, nil
 	}
 	if pool.Status.State != Online {
 		message := string(pool.Status.State)
 		if pool.Status.Reason != "" {
 			message = fmt.Sprintf("%s: %s", pool.Status.State, pool.Status.Reason)
 		}
-		return "", "", errors.Errorf("pool is unhealthy: %s", message)
+		return "", "", 0, errors.Errorf("pool is unhealthy: %s", message)
 	}
 
 	var state SnapshotState
 	var reason string
+	var requeueAfter time.Duration
 	err := pool.WithConnection(ctx, r.client, func(connection *Connection) error {
 		var err error
-		state, reason, err = r.reconcileWithConnection(ctx, pool, snapshot, connection)
+		state, reason, requeueAfter, err = r.reconcileWithConnection(ctx, pool, snapshot, connection)
 		return err
 	})
-	return state, reason, err
+	return state, reason, requeueAfter, err
 }
 
-func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool Pool, snapshot *PoolSnapshot, connection *Connection) (SnapshotState, string, error) {
+func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool Pool, snapshot *PoolSnapshot, connection *Connection) (SnapshotState, string, time.Duration, error) {
+	logger := log.FromContext(ctx)
 	if len(snapshot.Spec.Datasets) == 0 {
-		return "", "", errors.New(".spec.datasets must specify at least 1 dataset")
+		return "", "", 0, errors.New(".spec.datasets must specify at least 1 dataset")
 	}
 	for _, dataset := range snapshot.Spec.Datasets {
 		if !pool.validDatasetName(dataset.Name) {
-			return "", "", errors.Errorf("invalid dataset selector name %q: name must start with pool name %s", dataset.Name, pool.Spec.Name)
+			return "", "", 0, errors.Errorf("invalid dataset selector name %q: name must start with pool name %s", dataset.Name, pool.Spec.Name)
 		}
 	}
 
 	recursiveDatasets, singularDatasets, err := r.matchDatasets(ctx, snapshot, connection)
 	if err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
 
 	if snapshot.DeletionTimestamp != nil {
 		if !slices.Contains(snapshot.Finalizers, snapshotDestroyFinalizer) {
-			return snapshot.Status.State, snapshot.Status.Reason, nil
+			return snapshot.Status.State, snapshot.Status.Reason, 0, nil
 		}
 		if len(recursiveDatasets) > 0 {
 			name, args := destroySnapshotCommand(recursiveDatasets, snapshot.Name, true)
 			_, err := connection.ExecCombinedOutput(ctx, name, args...)
 			if err != nil {
-				return "", "", err
+				return "", "", 0, err
 			}
 		}
 		if len(singularDatasets) > 0 {
 			name, args := destroySnapshotCommand(singularDatasets, snapshot.Name, false)
 			_, err := connection.ExecCombinedOutput(ctx, name, args...)
 			if err != nil {
-				return "", "", err
+				return "", "", 0, err
 			}
 		}
 
 		snapshot.Finalizers = slices.DeleteFunc(snapshot.Finalizers, func(s string) bool { return s == snapshotDestroyFinalizer })
-		return snapshot.Status.State, snapshot.Status.Reason, r.client.Update(ctx, snapshot)
+		return snapshot.Status.State, snapshot.Status.Reason, 0, r.client.Update(ctx, snapshot)
 	}
 
-	if snapshot.Spec.Deadline != nil && snapshot.Spec.Deadline.Time.Before(r.timeNow()) {
-		return SnapshotFailed, "did not create snapshot before deadline", nil
+	now := r.clock.Now()
+	if snapshot.Spec.Deadline != nil && (snapshot.Spec.Deadline.Time.Before(now) || snapshot.Spec.Deadline.Time.Equal(now)) {
+		return SnapshotFailed, "did not create snapshot before deadline", 0, nil
+	}
+	requeueAfter := 5 * time.Minute
+	if snapshot.Spec.Deadline != nil {
+		requeueAfter = min(snapshot.Spec.Deadline.Sub(now), requeueAfter)
 	}
 
 	snapshot.Status = &SnapshotStatus{State: SnapshotPending}
 	if err := r.client.Status().Update(ctx, snapshot); err != nil {
-		return "", "", err
+		return "", "", 0, err
 	}
 	if !slices.Contains(snapshot.Finalizers, snapshotDestroyFinalizer) {
 		snapshot.Finalizers = append(snapshot.Finalizers, snapshotDestroyFinalizer)
 		if err := r.client.Update(ctx, snapshot); err != nil {
-			return "", "", err
+			return "", "", 0, err
 		}
 	}
 
@@ -210,18 +220,20 @@ func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool P
 		name, args := createSnapshotCommand(recursiveDatasets, snapshot.Name, true)
 		_, err := connection.ExecCombinedOutput(ctx, name, args...)
 		if err != nil {
-			return "", "", err
+			logger.Error(err, "Failed to snapshot datasets recursively")
+			return SnapshotError, err.Error(), requeueAfter, nil
 		}
 	}
 	if len(singularDatasets) > 0 {
 		name, args := createSnapshotCommand(singularDatasets, snapshot.Name, false)
 		_, err := connection.ExecCombinedOutput(ctx, name, args...)
 		if err != nil {
-			return "", "", err
+			logger.Error(err, "Failed to snapshot datasets")
+			return SnapshotError, err.Error(), requeueAfter, nil
 		}
 	}
 
-	return SnapshotCompleted, "", nil
+	return SnapshotCompleted, "", 0, nil
 }
 
 func (r *SnapshotReconciler) matchDatasets(ctx context.Context, snapshot *PoolSnapshot, connection *Connection) (recursive, singular []string, err error) {

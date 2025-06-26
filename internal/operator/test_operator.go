@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	corev1 "k8s.io/api/core/v1"
@@ -53,32 +54,9 @@ func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 	}
 }
 
-func testTime() time.Time {
-	return time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
-}
-
-// TestRelativeTime returns the test's clock time in UTC after adding 'add'
-func TestRelativeTime(add time.Duration) time.Time {
-	return testTime().UTC().Add(add)
-}
-
-// TestRoundedRelativeTime returns the test's clock time in UTC after rounding to 'round' and then adding 'add'
-func TestRoundedRelativeTime(round, add time.Duration) time.Time {
-	return testTime().UTC().Round(round).Add(add)
-}
-
-// TestRelativeMetaV1Time is like TestRelativeTime but returns a [metav1.Time] in local time
-func TestRelativeMetaV1Time(add time.Duration) metav1.Time {
-	return metav1.Time{Time: TestRelativeTime(add).Local()}
-}
-
-// TestRoundedRelativeMetaV1Time is like TestRoundedRelativeTime but returns a [metav1.Time] in local time
-func TestRoundedRelativeMetaV1Time(round, add time.Duration) metav1.Time {
-	return metav1.Time{Time: TestRoundedRelativeTime(round, add).Local()}
-}
-
 // TestRunConfig contains data necessary for running tests. Returned from [RunTest].
 type TestRunConfig struct {
+	Clock     *clock.Test
 	Namespace string
 }
 
@@ -112,14 +90,15 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 	if testing.Verbose() {
 		level = slog.LevelDebug
 	}
+	clock := clock.NewTest()
 	operator, err := New(ctx, testEnv.RESTConfig(), Config{
 		LogHandler:         testlog.NewLogHandler(tb, level),
 		MetricsPort:        "0",
 		Namespace:          namespace,
+		clock:              clock,
 		idempotentMetrics:  true,
 		maxSessionWait:     8 * time.Second,
 		onlyWatchNamespace: namespace,
-		timeNow:            testTime,
 	})
 	if err != nil {
 		tb.Fatal(err)
@@ -136,6 +115,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 	}()
 
 	return TestRunConfig{
+		Clock:     clock,
 		Namespace: namespace,
 	}
 }
