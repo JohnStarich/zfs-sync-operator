@@ -161,10 +161,7 @@ func (r *Reconciler) reconcileSnapshotInterval(ctx context.Context, now time.Tim
 	}
 
 	if len(snapshots[SnapshotPending])+len(snapshots[SnapshotError]) == 0 {
-		nextTime, nextTimeIsInThePast, err := nextSnapshot(ctx, now, interval.Interval.Duration, snapshots[SnapshotCompleted])
-		if err != nil {
-			return 0, err
-		}
+		nextTime, nextTimeIsInThePast := nextSnapshot(ctx, now, interval.Interval.Duration, snapshots[SnapshotCompleted])
 		timeUntilDeadline = nextTime.Sub(now)
 		if nextTimeIsInThePast {
 			deadline := nextTime.Add(interval.Interval.Duration)
@@ -173,7 +170,6 @@ func (r *Reconciler) reconcileSnapshotInterval(ctx context.Context, now time.Tim
 					GenerateName: interval.Name + "-",
 					Namespace:    pool.Namespace,
 					Labels:       map[string]string{snapshotIntervalLabel: interval.Name},
-					Annotations:  map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
 				},
 				Spec: SnapshotSpec{
 					Pool:                 corev1.LocalObjectReference{Name: pool.Name},
@@ -283,43 +279,45 @@ func unsignedLen[Value any](values []Value) uint {
 	return uint(len(values))
 }
 
-// SortScheduledSnapshots sorts snapshots by their scheduled timestamp.
-// This only applies to PoolSnapshots created by a Pool's snapshots configuration.
-// If any snapshot is encountered with an invalid timestamp, the sort fails.
+// SortScheduledSnapshots sorts snapshots by their deadline.
+// This usually only applies to PoolSnapshots created by a Pool's snapshots configuration.
+// nil deadlines are sorted first.
 func SortScheduledSnapshots(snapshots []*PoolSnapshot) error {
 	var sortErr error
 	slices.SortFunc(snapshots, func(a, b *PoolSnapshot) int {
-		annotationA, annotationB := a.Annotations[snapshotTimestampAnnotation], b.Annotations[snapshotTimestampAnnotation]
-		timeA, err := time.Parse(time.RFC3339, annotationA)
-		if sortErr == nil && err != nil {
-			sortErr = errors.WithMessagef(err, "pool snapshot %s", b.Name)
+		deadlineA, deadlineB := a.Spec.Deadline, b.Spec.Deadline
+		switch {
+		case deadlineA == nil && deadlineB == nil:
 			return 0
+		case deadlineA == nil:
+			return -1
+		case deadlineB == nil:
+			return 1
+		default:
+			return deadlineA.Compare(deadlineB.Time)
 		}
-		timeB, err := time.Parse(time.RFC3339, annotationB)
-		if sortErr == nil && err != nil {
-			sortErr = errors.WithMessagef(err, "pool snapshot %s", b.Name)
-			return 0
-		}
-		return timeA.Compare(timeB)
 	})
 	return sortErr
 }
 
-func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, completedSnapshots []*PoolSnapshot) (time.Time, bool, error) {
+func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, completedSnapshots []*PoolSnapshot) (time.Time, bool) {
 	logger := log.FromContext(ctx)
 	now = now.UTC()
-	if len(completedSnapshots) == 0 {
+
+	var lastDeadline *metav1.Time
+	for _, snapshot := range slices.Backward(completedSnapshots) {
+		lastDeadline = snapshot.Spec.Deadline
+		if lastDeadline != nil {
+			break
+		}
+	}
+	if lastDeadline == nil {
 		nextTime := now.Round(interval).Add(interval)
 		logger.Info("No completed snapshots, recommending next snapshot time", "nextTime", nextTime)
-		return nextTime, true, nil
+		return nextTime, true
 	}
-	last := completedSnapshots[len(completedSnapshots)-1]
-	lastTime, err := time.Parse(time.RFC3339, last.Annotations[snapshotTimestampAnnotation])
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	nextTime := lastTime.Add(interval)
-	beforeNow := nextTime.Before(now) || nextTime.Equal(now)
+	nextTime := lastDeadline.Time
+	beforeNow := nextTime.Before(now)
 	logger.Info("Found completed snapshot, recommending next time after interval", "nextTime", nextTime, "beforeNow", beforeNow)
-	return nextTime, beforeNow, nil
+	return nextTime, beforeNow
 }
