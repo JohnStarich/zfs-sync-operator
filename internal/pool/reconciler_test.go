@@ -400,8 +400,9 @@ func startSSHOverWireGuard(tb testing.TB, execResults map[string]*ssh.TestExecRe
 func TestPoolCreatesSnapshots(t *testing.T) {
 	t.Parallel()
 	const (
-		somePoolName = "somepool"
-		nameLabel    = "zfs-sync-operator.johnstarich.com/snapshot-interval-name"
+		somePoolName        = "somepool"
+		timestampAnnotation = "zfs-sync-operator.johnstarich.com/snapshot-timestamp"
+		nameLabel           = "zfs-sync-operator.johnstarich.com/snapshot-interval-name"
 	)
 	makePoolOwnerReference := func() metav1.OwnerReference {
 		return metav1.OwnerReference{
@@ -442,6 +443,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -474,6 +476,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -489,6 +492,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "daily-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(24*time.Hour, 24*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "daily"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -504,6 +508,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "weekly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(7*24*time.Hour, 7*24*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "weekly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -519,6 +524,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "monthly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(365*24*time.Hour/12, 365*24*time.Hour/12).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "monthly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -534,6 +540,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "yearly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(365*24*time.Hour, 365*24*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "yearly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -554,11 +561,12 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName: "hourly-",
+						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -existingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:       map[string]string{nameLabel: "hourly"},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
-						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(existingSnapshotsDelta, -existingSnapshotsDelta)),
+						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, 0)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
 						},
@@ -584,6 +592,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -existingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -604,6 +613,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName: "hourly-",
+						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -2*existingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:       map[string]string{nameLabel: "hourly"},
 					},
 					Spec: zfspool.SnapshotSpec{
@@ -634,6 +644,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -2*existingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -650,6 +661,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 0).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
