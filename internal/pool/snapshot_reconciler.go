@@ -248,8 +248,8 @@ func runZFSCommandIfArgs(ctx context.Context, connection *Connection, subcommand
 	if len(args) == 0 {
 		return nil
 	}
-	commandArgs := append([]string{subcommand}, args...)
-	_, err := connection.ExecCombinedOutput(ctx, "/usr/sbin/zfs", commandArgs...)
+	commandArgs := append([]string{"/usr/sbin/zfs", subcommand}, args...)
+	_, err := connection.ExecCombinedOutput(ctx, "/usr/bin/sudo", commandArgs...)
 	return err
 }
 

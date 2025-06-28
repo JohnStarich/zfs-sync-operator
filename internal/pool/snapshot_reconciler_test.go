@@ -40,7 +40,7 @@ func TestSnapshot(t *testing.T) {
 			description: "happy path - single dataset",
 			execResults: map[string]*ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
 			},
@@ -61,7 +61,7 @@ func TestSnapshot(t *testing.T) {
 			description: "slow reconcile shows Running",
 			execResults: map[string]*ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
 					ExitCode:    0,
 					WaitContext: makeCtx(),
 				},
@@ -83,7 +83,7 @@ func TestSnapshot(t *testing.T) {
 			description: "multiple datasets",
 			execResults: map[string]*ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
 			},
@@ -105,7 +105,7 @@ func TestSnapshot(t *testing.T) {
 			description: "multiple recursive datasets",
 			execResults: map[string]*ssh.TestExecResult{
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
+				fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, someZPoolName, someSnapshotName): {
 					ExitCode: 0,
 				},
 			},
@@ -139,7 +139,7 @@ func TestSnapshot(t *testing.T) {
 %[1]s/some-dataset-2
 %[1]s/some-dataset-3
 `, someZPoolName), ExitCode: 0},
-				fmt.Sprintf(`/usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-3\@%[2]s`, someZPoolName, someSnapshotName): {ExitCode: 0},
+				fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-3\@%[2]s`, someZPoolName, someSnapshotName): {ExitCode: 0},
 			},
 			snapshotSpec: zfspool.SnapshotSpec{
 				Pool: corev1.LocalObjectReference{Name: somePoolName},
@@ -269,9 +269,9 @@ func TestSnapshotDeleteDestroysZFSSnapshot(t *testing.T) {
 	run := operator.RunTest(t, TestEnv)
 	destroyCalled := false
 	sshUser, sshClientPrivateKey, _, sshAddr := ssh.TestServer(t, ssh.TestConfig{ExecResults: map[string]*ssh.TestExecResult{
-		"/usr/sbin/zpool status " + somePoolName:                                                     {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
-		fmt.Sprintf(`/usr/sbin/zfs snapshot -r %s/some-dataset\@%s`, somePoolName, someSnapshotName): {ExitCode: 0},
-		fmt.Sprintf(`/usr/sbin/zfs destroy -r %s/some-dataset\@%s`, somePoolName, someSnapshotName):  {ExitCode: 0, Called: &destroyCalled},
+		"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
+		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot -r %s/some-dataset\@%s`, somePoolName, someSnapshotName): {ExitCode: 0},
+		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs destroy -r %s/some-dataset\@%s`, somePoolName, someSnapshotName):  {ExitCode: 0, Called: &destroyCalled},
 	}})
 	const (
 		sshSecretName         = "ssh"

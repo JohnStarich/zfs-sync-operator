@@ -437,7 +437,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			},
 			sshConfig: ssh.TestConfig{
 				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/bin/sudo /usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
@@ -470,7 +470,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			},
 			sshConfig: ssh.TestConfig{
 				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/bin/sudo /usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
@@ -586,7 +586,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			},
 			sshConfig: ssh.TestConfig{
 				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/bin/sudo /usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
@@ -638,7 +638,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			},
 			sshConfig: ssh.TestConfig{
 				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
-				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/sbin/zfs snapshot ": {ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/bin/sudo /usr/sbin/zfs snapshot ": {ExitCode: 0}},
 			},
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
@@ -761,7 +761,7 @@ func TestPoolRequeuesSnapshotsOnTime(t *testing.T) {
 			"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 		},
 		ExecPrefixResults: map[string]*ssh.TestExecResult{
-			fmt.Sprintf(`/usr/sbin/zfs snapshot -r %s\@fast-`, somePoolName): {
+			fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot -r %s\@fast-`, somePoolName): {
 				Stdout:   []byte("still snapshot, even on failed previous snapshots"),
 				ExitCode: 1,
 			},
