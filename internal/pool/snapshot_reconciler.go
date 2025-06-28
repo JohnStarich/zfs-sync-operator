@@ -127,7 +127,7 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 	if snapshot.Status == nil { // Guard against nil status
 		snapshot.Status = &SnapshotStatus{State: SnapshotPending}
 	}
-	if snapshot.DeletionTimestamp == nil && snapshot.Status.State == SnapshotCompleted || snapshot.Status.State == SnapshotFailed {
+	if snapshot.DeletionTimestamp == nil && (snapshot.Status.State == SnapshotCompleted || snapshot.Status.State == SnapshotFailed) {
 		return snapshot.Status.State, snapshot.Status.Reason, 0, nil
 	}
 
