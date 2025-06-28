@@ -18,5 +18,5 @@ test:
 
 .PHONY: run
 run:
-	kubectl apply -f ./config/crd
+	kubectl apply -f ./internal/config/crd
 	go run ./cmd/zfs-sync-operator -log-level -4

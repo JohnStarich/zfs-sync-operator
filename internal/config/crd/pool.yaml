@@ -71,6 +71,37 @@ spec:
                         type: string
                       key:
                         type: string
+              snapshots:
+                type: object
+                properties:
+                  template:
+                    type: object
+                    properties:
+                      datasets:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            recursive:
+                              type: object
+                              properties:
+                                skipChildren:
+                                  type: array
+                                  items:
+                                    type: string
+                  intervals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        historyLimit:
+                          type: integer
+                        interval:
+                          type: string
           status:
             type: object
             properties:

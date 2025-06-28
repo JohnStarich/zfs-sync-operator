@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	corev1 "k8s.io/api/core/v1"
@@ -55,6 +56,7 @@ func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 
 // TestRunConfig contains data necessary for running tests. Returned from [RunTest].
 type TestRunConfig struct {
+	Clock     *clock.Test
 	Namespace string
 }
 
@@ -88,12 +90,15 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 	if testing.Verbose() {
 		level = slog.LevelDebug
 	}
+	clock := clock.NewTest()
 	operator, err := New(ctx, testEnv.RESTConfig(), Config{
-		LogHandler:        testlog.NewLogHandler(tb, level),
-		MetricsPort:       "0",
-		Namespace:         namespace,
-		idempotentMetrics: true,
-		maxSessionWait:    8 * time.Second,
+		LogHandler:         testlog.NewLogHandler(tb, level),
+		MetricsPort:        "0",
+		Namespace:          namespace,
+		clock:              clock,
+		idempotentMetrics:  true,
+		maxSessionWait:     8 * time.Second,
+		onlyWatchNamespace: namespace,
 	})
 	if err != nil {
 		tb.Fatal(err)
@@ -110,12 +115,21 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 	}()
 
 	return TestRunConfig{
+		Clock:     clock,
 		Namespace: namespace,
 	}
 }
 
 func namespaceName(tb testing.TB) string {
 	name := tb.Name()
+	const (
+		maxNamespaceLength = 63
+		randomSuffixLength = 6
+		maxLength          = maxNamespaceLength - randomSuffixLength
+	)
+	if len(name) > maxLength {
+		name = name[:maxLength]
+	}
 	name = strings.ToLower(name)
 	name = strings.ReplaceAll(name, "/", "-")
 	name = strings.ReplaceAll(name, "#", "-")

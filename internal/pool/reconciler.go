@@ -4,28 +4,72 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/clock"
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh"
-	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
+)
+
+const (
+	snapshotIntervalLabel       = name.DomainPrefix + "snapshot-interval-name"
+	snapshotTimestampAnnotation = name.DomainPrefix + "snapshot-timestamp"
 )
 
 // Reconciler reconciles Pool resources to validate their Pools and associated connections
 type Reconciler struct {
-	client         ctrlclient.Client
+	client         client.Client
+	clock          clock.Clock
 	maxSessionWait time.Duration
 }
 
-// NewReconciler returns a new pool reconciler
-func NewReconciler(client ctrlclient.Client, maxSessionWait time.Duration) *Reconciler {
-	return &Reconciler{
-		client:         client,
-		maxSessionWait: maxSessionWait,
+// RegisterReconciler registers a Pool reconciler with manager
+func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSessionWait time.Duration, clock clock.Clock) error {
+	ctrl, err := controller.New("pool", manager, controller.Options{
+		Reconciler: &Reconciler{
+			client:         manager.GetClient(),
+			maxSessionWait: maxSessionWait,
+			clock:          clock,
+		},
+	})
+	if err != nil {
+		return err
 	}
+
+	if err := ctrl.Watch(source.Kind(
+		manager.GetCache(),
+		&Pool{},
+		&handler.TypedEnqueueRequestForObject[*Pool]{},
+		predicate.TypedGenerationChangedPredicate[*Pool]{},
+	)); err != nil {
+		return err
+	}
+
+	if err := ctrl.Watch(source.Kind(
+		manager.GetCache(),
+		&PoolSnapshot{},
+		handler.TypedEnqueueRequestForOwner[*PoolSnapshot](manager.GetScheme(), manager.GetRESTMapper(), &Pool{}),
+	)); err != nil {
+		return err
+	}
+
+	return registerSnapshotReconciler(ctx, manager, clock)
 }
 
 // Reconcile implements [reconcile.Reconciler]
@@ -37,49 +81,175 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 	logger.Info("got pool", "pool", pool.Spec, "generation", pool.Generation)
-	resourceVersion, state, reason, reconcileErr := r.reconcile(ctx, pool)
-
-	result := reconcile.Result{}
-	pool.ResourceVersion = resourceVersion
-	if reconcileErr == nil {
-		logger.Info("pool reconciled successfully", "state", state)
-		pool.Status = &Status{
-			State:  state,
-			Reason: reason,
-		}
-	} else {
+	requeueAfter, reconcileErr := r.reconcile(ctx, &pool)
+	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
-		const retryErrorWait = 2 * time.Minute
-		result.RequeueAfter = retryErrorWait
 		pool.Status = &Status{
-			State:  "Error",
+			State:  Error,
 			Reason: reconcileErr.Error(),
 		}
+		if err := r.client.Status().Update(ctx, &pool); err != nil {
+			return reconcile.Result{}, errors.Wrap(err, "failed to update status")
+		}
+		return reconcile.Result{}, reconcileErr
 	}
-	statusErr := r.client.Status().Update(ctx, &pool)
-	return result, errors.Wrap(statusErr, "failed to update status")
+	logger.Info("pool reconciled successfully", "state", pool.Status.State)
+	return reconcile.Result{
+		RequeueAfter: requeueAfter,
+	}, nil
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, pool Pool) (resourceVersion, state, reason string, returnedErr error) {
+func (r *Reconciler) reconcile(ctx context.Context, pool *Pool) (requeueAfter time.Duration, err error) {
 	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
 	defer cancel()
-
-	command := safelyFormatCommand("/usr/sbin/zpool", "status", pool.Spec.Name)
-	var zpoolStatus []byte
-	resourceVersion, err := pool.WithSession(ctx, r.client, func(session *ssh.Session) error {
+	reconcileErr := pool.WithConnection(ctx, r.client, func(connection *Connection) error {
 		var err error
-		zpoolStatus, err = session.CombinedOutput(command)
-		zpoolStatus = bytes.TrimSpace(zpoolStatus)
-		return errors.Wrapf(err, `failed to run '%s': %s`, command, string(zpoolStatus))
+		requeueAfter, err = r.reconcileWithConnection(ctx, pool, connection)
+		return err
 	})
+	return requeueAfter, reconcileErr
+}
+
+func (r *Reconciler) reconcileWithConnection(ctx context.Context, pool *Pool, connection *Connection) (requeueAfter time.Duration, err error) {
+	logger := log.FromContext(ctx)
+	zpoolStatus, err := connection.ExecCombinedOutput(ctx, "/usr/sbin/zpool", "status", pool.Spec.Name)
 	if err != nil {
 		if bytes.HasSuffix(zpoolStatus, []byte(": no such pool")) {
-			return resourceVersion, "NotFound", string(zpoolStatus), nil
+			pool.Status = &Status{
+				State:  NotFound,
+				Reason: fmt.Sprintf("zpool with name '%s' could not be found", pool.Spec.Name),
+			}
+			return 0, r.client.Status().Update(ctx, pool)
 		}
-		return resourceVersion, "", "", err
+		return 0, err
 	}
-	stateField := stateFieldFromZpoolStatus(zpoolStatus)
-	return resourceVersion, stateFromStateField(stateField), "", nil
+	pool.Status = &Status{
+		State: stateFromStateField(stateFieldFromZpoolStatus(zpoolStatus)),
+	}
+	if err := r.client.Status().Update(ctx, pool); err != nil {
+		return 0, err
+	}
+
+	if pool.Spec.Snapshots != nil {
+		intervals, err := pool.Spec.Snapshots.validateIntervals()
+		if err != nil {
+			return 0, err
+		}
+		now := r.clock.Now()
+		requeueAfter = 0 * time.Second
+		for _, interval := range intervals {
+			wait, err := r.reconcileSnapshotInterval(ctx, now, pool, interval)
+			if err != nil {
+				return 0, errors.WithMessagef(err, "failed reconciling interval %s", interval.Name)
+			}
+			logger.Info("Interval's next wait time", "wait", wait)
+			if requeueAfter == 0 || (wait != 0 && wait < requeueAfter) {
+				requeueAfter = wait
+			}
+		}
+		logger.Info("Requeuing to handle next interval", "requeueAfter", requeueAfter)
+	}
+	return requeueAfter, nil
+}
+
+func (r *Reconciler) reconcileSnapshotInterval(ctx context.Context, now time.Time, pool *Pool, interval SnapshotIntervalSpec) (timeUntilDeadline time.Duration, err error) {
+	logger := log.FromContext(ctx)
+
+	snapshots, err := r.intervalSnapshotsByState(ctx, pool, interval)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(snapshots[SnapshotPending])+len(snapshots[SnapshotError]) == 0 {
+		nextTime, nextTimeIsInThePast, err := nextSnapshot(ctx, now, interval.Interval.Duration, snapshots[SnapshotCompleted])
+		if err != nil {
+			return 0, err
+		}
+		timeUntilDeadline = nextTime.Sub(now)
+		if nextTimeIsInThePast {
+			deadline := nextTime.Add(interval.Interval.Duration)
+			snapshot := PoolSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: interval.Name + "-",
+					Namespace:    pool.Namespace,
+					Labels:       map[string]string{snapshotIntervalLabel: interval.Name},
+					Annotations:  map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
+				},
+				Spec: SnapshotSpec{
+					Pool:                 corev1.LocalObjectReference{Name: pool.Name},
+					Deadline:             &metav1.Time{Time: deadline},
+					SnapshotSpecTemplate: pool.Spec.Snapshots.Template,
+				},
+			}
+			if err := controllerutil.SetControllerReference(pool, &snapshot, r.client.Scheme()); err != nil {
+				return 0, err
+			}
+			if err := r.client.Create(ctx, &snapshot); err != nil {
+				return 0, err
+			}
+			timeUntilDeadline = deadline.Sub(now)
+		}
+	}
+	const maxFailedHistory = 1
+	if len(snapshots[SnapshotFailed]) > maxFailedHistory {
+		expired := dropRight(snapshots[SnapshotFailed], maxFailedHistory)
+		logger.Info("Cleaning up oldest failed snapshots", "failed", len(expired), "maxFailedHistory", maxFailedHistory)
+		for _, expiredSnapshot := range expired {
+			if err := r.client.Delete(ctx, expiredSnapshot); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if unsignedLen(snapshots[SnapshotCompleted]) > interval.HistoryLimit {
+		expired := dropRight(snapshots[SnapshotCompleted], interval.HistoryLimit)
+		logger.Info("Cleaning up snapshots older than maximum history", "expired", len(expired), "maxHistory", interval.HistoryLimit)
+		for _, expiredSnapshot := range expired {
+			if err := r.client.Delete(ctx, expiredSnapshot); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return timeUntilDeadline, nil
+}
+
+func (r *Reconciler) intervalSnapshotsByState(ctx context.Context, pool *Pool, interval SnapshotIntervalSpec) (map[SnapshotState][]*PoolSnapshot, error) {
+	logger := log.FromContext(ctx)
+
+	var allSnapshots PoolSnapshotList
+	err := r.client.List(ctx, &allSnapshots, &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labels.Set{snapshotIntervalLabel: interval.Name}),
+		FieldSelector: fields.AndSelectors(
+			fields.OneTermEqualSelector(".spec.pool.name", pool.Name),
+		),
+		Namespace: pool.Namespace,
+	})
+	if err != nil {
+		return nil, errors.WithMessagef(err, "failed to retrieve PoolSnapshots for pool %s on interval %s", pool.Name, interval.Name)
+	}
+	if err := SortScheduledSnapshots(allSnapshots.Items); err != nil {
+		return nil, err
+	}
+
+	snapshotsByState := make(map[SnapshotState][]*PoolSnapshot)
+	nilStatus := 0
+	for _, snapshot := range allSnapshots.Items {
+		var state SnapshotState
+		if snapshot.Status != nil {
+			state = snapshot.Status.State
+		} else {
+			state = SnapshotPending
+			nilStatus++
+		}
+		snapshotsByState[state] = append(snapshotsByState[state], snapshot)
+	}
+	logger.Info("Looked up connected snapshots",
+		"nil", nilStatus,
+		"pending", len(snapshotsByState[SnapshotPending]),
+		"error", len(snapshotsByState[SnapshotError]),
+		"completed", len(snapshotsByState[SnapshotCompleted]),
+		"failed", len(snapshotsByState[SnapshotFailed]),
+	)
+	return snapshotsByState, nil
 }
 
 // stateFieldFromZpoolStatus parses the plain text output of 'zpool status <pool>'.
@@ -102,13 +272,54 @@ func stateFieldFromZpoolStatus(status []byte) string {
 	return ""
 }
 
-func stateFromStateField(state string) string {
-	// A pool's health status is described by one of three states: online, degraded, or faulted.
-	// - https://openzfs.github.io/openzfs-docs/man/v0.8/8/zpool.8.html#Device_Failure_and_Recovery
-	switch strings.ToUpper(state) { // should already be in uppercase, but uppercasing defensively
-	case "ONLINE", "DEGRADED", "FAULTED":
-		return strings.ToUpper(state[0:1]) + strings.ToLower(state[1:])
-	default:
-		return "Unknown"
+func dropRight[Value any](values []Value, n uint) []Value {
+	if unsignedLen(values) < n {
+		return nil
 	}
+	return values[:unsignedLen(values)-n]
+}
+
+func unsignedLen[Value any](values []Value) uint {
+	return uint(len(values))
+}
+
+// SortScheduledSnapshots sorts snapshots by their scheduled timestamp.
+// This only applies to PoolSnapshots created by a Pool's snapshots configuration.
+// If any snapshot is encountered with an invalid timestamp, the sort fails.
+func SortScheduledSnapshots(snapshots []*PoolSnapshot) error {
+	var sortErr error
+	slices.SortFunc(snapshots, func(a, b *PoolSnapshot) int {
+		annotationA, annotationB := a.Annotations[snapshotTimestampAnnotation], b.Annotations[snapshotTimestampAnnotation]
+		timeA, err := time.Parse(time.RFC3339, annotationA)
+		if sortErr == nil && err != nil {
+			sortErr = errors.WithMessagef(err, "pool snapshot %s", b.Name)
+			return 0
+		}
+		timeB, err := time.Parse(time.RFC3339, annotationB)
+		if sortErr == nil && err != nil {
+			sortErr = errors.WithMessagef(err, "pool snapshot %s", b.Name)
+			return 0
+		}
+		return timeA.Compare(timeB)
+	})
+	return sortErr
+}
+
+func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, completedSnapshots []*PoolSnapshot) (time.Time, bool, error) {
+	logger := log.FromContext(ctx)
+	now = now.UTC()
+	if len(completedSnapshots) == 0 {
+		nextTime := now.Round(interval).Add(interval)
+		logger.Info("No completed snapshots, recommending next snapshot time", "nextTime", nextTime)
+		return nextTime, true, nil
+	}
+	last := completedSnapshots[len(completedSnapshots)-1]
+	lastTime, err := time.Parse(time.RFC3339, last.Annotations[snapshotTimestampAnnotation])
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	nextTime := lastTime.Add(interval)
+	beforeNow := nextTime.Before(now) || nextTime.Equal(now)
+	logger.Info("Found completed snapshot, recommending next time after interval", "nextTime", nextTime, "beforeNow", beforeNow)
+	return nextTime, beforeNow, nil
 }

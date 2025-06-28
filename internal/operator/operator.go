@@ -3,7 +3,6 @@ package operator
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"io"
 	"log/slog"
@@ -13,20 +12,20 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
+	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
+	"github.com/pkg/errors"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/config"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // Run starts an [Operator] with the given runtime context, CLI args, and output stream.
@@ -75,27 +74,39 @@ type Operator struct {
 
 // Config contains configuration to set up an [Operator]
 type Config struct {
-	LogHandler        slog.Handler
-	MetricsPort       string
-	Namespace         string
-	idempotentMetrics bool          // disables safety checks for double metrics registrations
-	maxSessionWait    time.Duration // allows tests to shorten wait times for faster pass/fail results
+	LogHandler         slog.Handler
+	MetricsPort        string
+	Namespace          string
+	clock              clock.Clock   // in tests only, control time for more consistent, assertable results
+	idempotentMetrics  bool          // disables safety checks for double metrics registrations
+	maxSessionWait     time.Duration // allows tests to shorten wait times for faster pass/fail results
+	onlyWatchNamespace string        // in tests only, restrict watches to this namespace
 }
 
 // New returns a new [Operator]
 func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, error) {
+	logger := logr.FromSlogHandler(c.LogHandler)
+	ctx = log.IntoContext(ctx, logger)
 	if c.MetricsPort == "" {
 		c.MetricsPort = "8080"
 	}
 	if c.maxSessionWait == 0 {
 		c.maxSessionWait = 1 * time.Minute
 	}
-	logger := logr.FromSlogHandler(c.LogHandler)
+	if c.clock == nil {
+		c.clock = &clock.Real{}
+	}
+
+	cacheOptions := cache.Options{}
+	if c.onlyWatchNamespace != "" {
+		cacheOptions.DefaultNamespaces = map[string]cache.Config{c.onlyWatchNamespace: {}}
+	}
 
 	const reconcilesPerCPU = 2 // Most of the controllers are network-bound, allow a little shared CPU time
 	mgr, err := manager.New(restConfig, manager.Options{
+		Cache:                         cacheOptions,
 		LeaderElection:                true,
-		LeaderElectionID:              name.Operator + ".johnstarich.com",
+		LeaderElectionID:              name.Domain,
 		LeaderElectionNamespace:       c.Namespace,
 		LeaderElectionReleaseOnCancel: true,
 		Logger:                        logger,
@@ -112,38 +123,11 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err != nil {
 		return nil, err
 	}
-
-	{ // Backup
-		ctrl, err := controller.New("backup", mgr, controller.Options{
-			Reconciler: backup.NewReconciler(mgr.GetClient()),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if err := ctrl.Watch(source.Kind(
-			mgr.GetCache(),
-			&backup.Backup{},
-			&handler.TypedEnqueueRequestForObject[*backup.Backup]{},
-			predicate.TypedGenerationChangedPredicate[*backup.Backup]{},
-		)); err != nil {
-			return nil, err
-		}
+	if err := backup.RegisterReconciler(ctx, mgr); err != nil {
+		return nil, err
 	}
-	{ // Pool
-		ctrl, err := controller.New("pool", mgr, controller.Options{
-			Reconciler: pool.NewReconciler(mgr.GetClient(), c.maxSessionWait),
-		})
-		if err != nil {
-			return nil, err
-		}
-		if err := ctrl.Watch(source.Kind(
-			mgr.GetCache(),
-			&pool.Pool{},
-			&handler.TypedEnqueueRequestForObject[*pool.Pool]{},
-			predicate.TypedGenerationChangedPredicate[*pool.Pool]{},
-		)); err != nil {
-			return nil, err
-		}
+	if err := pool.RegisterReconciler(ctx, mgr, c.maxSessionWait, c.clock); err != nil {
+		return nil, err
 	}
 
 	operator := &Operator{
