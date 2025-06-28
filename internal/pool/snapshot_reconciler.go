@@ -159,9 +159,7 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 
 func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool Pool, snapshot *PoolSnapshot, connection *Connection) (SnapshotState, string, time.Duration, error) {
 	logger := log.FromContext(ctx)
-	if len(snapshot.Spec.Datasets) == 0 {
-		return "", "", 0, errors.New(".spec.datasets must specify at least 1 dataset")
-	}
+	// NOTE: OpenAPI validator requires 1 or more datasets
 	for _, dataset := range snapshot.Spec.Datasets {
 		if !pool.validDatasetName(dataset.Name) {
 			return "", "", 0, errors.Errorf("invalid dataset selector name %q: name must start with pool name %s", dataset.Name, pool.Spec.Name)
