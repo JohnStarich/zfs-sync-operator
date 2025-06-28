@@ -8,11 +8,11 @@ Ensure your own peace of mind with long-term data protection.
 ### Pool
 
 A Pool represents a ZFS pool and its connection details, including WireGuard and SSH.
-Configure snapshots for automatic, scheduled ZFS snapshots on one or more datasets to be backed up to another Pool.
+Configure a snapshots schedule for automatic ZFS snapshots on one or more datasets, and clean them up with history limits.
 
 ### PoolSnapshot
 
-A PoolSnapshot represents a set of ZFS dataset snapshots. Pools create new PoolSnapshots on a schedule, and delete old ones as they age out.
+A PoolSnapshot represents a set of ZFS dataset snapshots. These are full lifecycle, so deleting them initiates a snapshot destroy on the connected Pool.
 
 ### Backup
 
