@@ -73,15 +73,28 @@ func TestServer(tb testing.TB, config TestConfig) (user, clientPrivateKey string
 	require.True(tb, isTCPAddress, "Listener address must have a port")
 	address = tcpAddress.AddrPort()
 
+	shutdownCtx, shutdownComplete := context.WithCancel(context.Background())
+	tb.Cleanup(func() {
+		<-shutdownCtx.Done()
+	})
+
+	testCtx, cancel := context.WithCancel(shutdownCtx)
+	tb.Cleanup(cancel)
 	user = "some-user"
-	go run(tb, config.Listener, user, clientRSAPrivateKey.Public(), serverPrivateKey, config)
+	go func() {
+		defer shutdownComplete()
+		run(testCtx, tb, config.Listener, user, clientRSAPrivateKey.Public(), serverPrivateKey, config)
+	}()
 	return user, clientPrivateKey, serverPublicKey, address
 }
 
 const publicKeyFingerprintExtension = "pubkey-fp"
 
-func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKey crypto.PublicKey, serverPrivateKey ssh.Signer, config TestConfig) {
+func run(ctx context.Context, tb testing.TB, listener net.Listener, clientUser string, clientPublicKey crypto.PublicKey, serverPrivateKey ssh.Signer, config TestConfig) {
 	tb.Helper()
+	tb.Cleanup(func() {
+		tryClose(tb, listener)
+	})
 	sshClientPublicKey, err := ssh.NewPublicKey(clientPublicKey)
 	require.NoError(tb, err)
 	sshClientPublicKeyString := string(sshClientPublicKey.Marshal())
@@ -100,15 +113,24 @@ func run(tb testing.TB, listener net.Listener, clientUser string, clientPublicKe
 	}
 	serverConfig.AddHostKey(serverPrivateKey)
 
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for {
 		netConn, err := listener.Accept()
 		if err != nil {
 			tb.Log("Error accepting connection:", err)
 			return
 		}
+		tb.Cleanup(func() {
+			tryClose(tb, netConn)
+		})
+		wg.Add(1)
 		go func() {
-			defer tryClose(tb, netConn)
-			handleConn(tb, netConn, &serverConfig, config)
+			defer func() {
+				tryClose(tb, netConn)
+				wg.Done()
+			}()
+			handleConn(ctx, tb, netConn, &serverConfig, config)
 		}()
 	}
 }
@@ -125,7 +147,7 @@ type exitStatusRequest struct {
 	Status uint32
 }
 
-func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig, config TestConfig) {
+func handleConn(ctx context.Context, tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig, config TestConfig) {
 	conn, chans, reqs, err := ssh.NewServerConn(netConn, serverConfig)
 	if err != nil {
 		tb.Log("Error handling connection:", err)
@@ -161,21 +183,19 @@ func handleConn(tb testing.TB, netConn net.Conn, serverConfig *ssh.ServerConfig,
 						tryClose(tb, channel)
 						wg.Done()
 					}()
-					exitCode := handleExecRequest(tb, command.Command, channel, channel, channel.Stderr(), config)
+					exitCode := handleExecRequest(ctx, tb, command.Command, channel, channel, channel.Stderr(), config)
 					exitStatus := exitStatusRequest{Status: safelyConvertExitCode(exitCode)}
 					_, err := channel.SendRequest(exitStatusRequestName, false, ssh.Marshal(exitStatus))
-					require.NoError(tb, err)
+					require.NoError(tb, ignoreShutdownErrors(err))
 				}()
-				if err := req.Reply(true, nil); err != nil && !errors.Is(err, io.EOF) {
-					require.NoError(tb, err)
-				}
+				require.NoError(tb, ignoreShutdownErrors(req.Reply(true, nil)))
 			}
 			wg.Done()
 		}(requests)
 	}
 }
 
-func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, stderr io.Writer, config TestConfig) int {
+func handleExecRequest(ctx context.Context, tb testing.TB, command string, stdin io.Reader, stdout, stderr io.Writer, config TestConfig) int {
 	result, hasResult := config.ExecResults[command]
 	if !hasResult {
 		for prefix, candidateResult := range config.ExecPrefixResults {
@@ -194,7 +214,7 @@ func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, s
 	}
 	if len(result.ExpectStdin) > 0 {
 		stdinBytes, err := io.ReadAll(stdin)
-		require.NoError(tb, err)
+		require.NoError(tb, ignoreShutdownErrors(err))
 		assert.EqualValues(tb, result.ExpectStdin, stdinBytes)
 	}
 	_, err := stdout.Write(result.Stdout)
@@ -202,7 +222,10 @@ func handleExecRequest(tb testing.TB, command string, stdin io.Reader, stdout, s
 	_, err = stderr.Write(result.Stderr)
 	require.NoError(tb, err)
 	if result.WaitContext != nil {
-		<-result.WaitContext.Done()
+		select {
+		case <-result.WaitContext.Done():
+		case <-ctx.Done():
+		}
 	}
 	return result.ExitCode
 }
@@ -216,13 +239,20 @@ func safelyConvertExitCode(i int) uint32 {
 }
 
 func mustClose(tb testing.TB, closer io.Closer) {
-	require.NoError(tb, closer.Close())
+	require.NoError(tb, ignoreShutdownErrors(closer.Close()))
 }
 
 func tryClose(tb testing.TB, closer io.Closer) {
 	tb.Helper()
 	err := closer.Close()
-	if err != nil {
+	if ignoreShutdownErrors(err) != nil {
 		tb.Log("Non-critical clean up failed:", err)
 	}
+}
+
+func ignoreShutdownErrors(err error) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
 }

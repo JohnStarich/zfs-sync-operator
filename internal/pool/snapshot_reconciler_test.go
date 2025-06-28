@@ -25,8 +25,8 @@ func TestSnapshot(t *testing.T) {
 		somePoolName     = "some-pool"
 		someSnapshotName = "some-snapshot"
 	)
-	makeTimeoutCtx := func(d time.Duration) context.Context {
-		ctx, cancel := context.WithTimeout(TestEnv.Context(), d)
+	makeCtx := func() context.Context {
+		ctx, cancel := context.WithCancel(TestEnv.Context())
 		t.Cleanup(cancel)
 		return ctx
 	}
@@ -63,7 +63,7 @@ func TestSnapshot(t *testing.T) {
 				"/usr/sbin/zpool status " + someZPoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
 				fmt.Sprintf(`/usr/sbin/zfs snapshot %s/some-dataset\@%s`, someZPoolName, someSnapshotName): {
 					ExitCode:    0,
-					WaitContext: makeTimeoutCtx(maxWait),
+					WaitContext: makeCtx(),
 				},
 			},
 			snapshotSpec: zfspool.SnapshotSpec{
