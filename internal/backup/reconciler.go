@@ -109,10 +109,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	}
 	logger.Info("got backup", "backup", backup.Spec)
 
-	state, reason, reconcileErr := r.reconcile(ctx, backup)
+	state, reconcileErr := r.reconcile(ctx, backup)
+	var returnErr error
+	if state == "" {
+		state = Error
+		returnErr = reconcileErr
+	}
+	var reason string
 	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
-		state = "Error"
 		reason = reconcileErr.Error()
 	} else {
 		logger.Info("backup reconciled successfully", "state", state)
@@ -124,26 +129,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err := r.client.Status().Update(ctx, &backup); err != nil {
 		return reconcile.Result{}, err
 	}
-	return reconcile.Result{}, reconcileErr
+	return reconcile.Result{}, returnErr
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, string, error) {
+func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, error) {
 	var source, destination pool.Pool
 	if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Source.Name}, &source); err != nil {
-		return "", "", errors.WithMessage(err, "get source Pool")
+		return "", errors.WithMessage(err, "get source Pool")
 	}
 	if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Destination.Name}, &destination); err != nil {
-		return "", "", errors.WithMessage(err, "get destination Pool")
+		return "", errors.WithMessage(err, "get destination Pool")
 	}
 
 	if err := validatePoolIsHealthy("source", source); err != nil {
-		return NotReady, err.Error(), nil
+		return NotReady, err
 	}
 	if source.Spec == nil || source.Spec.Snapshots == nil {
-		return NotReady, fmt.Sprintf("source pool %q must define .spec.snapshots, either empty (the default schedule) or custom intervals", source.Name), nil
+		return NotReady, errors.Errorf("source pool %q must define .spec.snapshots, either empty (the default schedule) or custom intervals", source.Name)
 	}
 	if err := validatePoolIsHealthy("destination", destination); err != nil {
-		return NotReady, err.Error(), nil
+		return NotReady, err
 	}
 
 	var completedSnapshots pool.PoolSnapshotList
@@ -155,10 +160,10 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, strin
 		Namespace: backup.Namespace,
 	})
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	if err := pool.SortScheduledSnapshots(completedSnapshots.Items); err != nil {
-		return "", "", err
+		return "", err
 	}
 	sendSnapshots := completedSnapshots.Items
 	if backup.Status.LastSentSnapshot != nil {
@@ -170,7 +175,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, strin
 		}
 	}
 	if len(sendSnapshots) == 0 {
-		return Ready, "", nil
+		return Ready, nil
 	}
 	sendLastSnapshot := sendSnapshots[len(sendSnapshots)-1]
 
@@ -180,10 +185,10 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, strin
 		})
 	})
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 
-	return Ready, "", nil
+	return Ready, nil
 }
 
 func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Backup, error) {

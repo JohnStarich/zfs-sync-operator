@@ -5,6 +5,7 @@ type State string
 
 // Backup lifecycle states
 const (
-	Ready    = State("Ready")
-	NotReady = State("NotReady")
+	Error    = State("Error")    // The operator failed to send recent snapshots
+	NotReady = State("NotReady") // One or both Pools are not ready to send/receive snapshots
+	Ready    = State("Ready")    // Backup is ready to send/receive snapshots
 )
