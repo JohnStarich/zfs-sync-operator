@@ -189,6 +189,7 @@ func (c *Connection) ExecCombinedOutput(ctx context.Context, name string, args .
 	return output, nil
 }
 
+// ExecWriteStdout is like [ExecCombinedOutput] but writes stdout to 'out' and closes when execution completes
 func (c *Connection) ExecWriteStdout(ctx context.Context, out io.WriteCloser, name string, args ...string) error {
 	session, err := c.client.NewSession()
 	if err != nil {
@@ -203,6 +204,7 @@ func (c *Connection) ExecWriteStdout(ctx context.Context, out io.WriteCloser, na
 	return errors.WithMessagef(err, "command '%s %s' failed with stderr output: %s", name, strings.Join(args, " "), &stderr)
 }
 
+// ExecReadStdin is like [ExecCombinedOutput] but reads stdin from 'in'
 func (c *Connection) ExecReadStdin(ctx context.Context, in io.Reader, name string, args ...string) error {
 	session, err := c.client.NewSession()
 	if err != nil {
