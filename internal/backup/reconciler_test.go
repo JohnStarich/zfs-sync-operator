@@ -31,41 +31,59 @@ const (
 func TestBackupReady(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		description    string
-		sourceErr      bool
-		destinationErr bool
-		expectStatus   *zfsbackup.Status
+		description          string
+		sourceErr            bool
+		destinationErr       bool
+		skipSnapshotSchedule bool
+		expectStatus         *zfsbackup.Status
 	}{
 		{
 			description:    "Ready when source and destination healthy",
 			sourceErr:      false,
 			destinationErr: false,
-			expectStatus:   &zfsbackup.Status{State: "Ready"},
+			expectStatus:   &zfsbackup.Status{State: zfsbackup.Ready},
 		},
 		{
 			description:    "NotReady when source unhealthy",
 			sourceErr:      true,
 			destinationErr: false,
-			expectStatus:   &zfsbackup.Status{State: "NotReady", Reason: `source pool "source" is unhealthy`},
+			expectStatus:   &zfsbackup.Status{State: zfsbackup.NotReady, Reason: `source pool "source" is unhealthy: Error: command '/usr/sbin/zpool status source' failed with output: error!: Process exited with status 1`},
 		},
 		{
 			description:    "NotReady when destination unhealthy",
 			sourceErr:      false,
 			destinationErr: true,
-			expectStatus:   &zfsbackup.Status{State: "NotReady", Reason: `destination pool "destination" is unhealthy`},
+			expectStatus:   &zfsbackup.Status{State: zfsbackup.NotReady, Reason: `destination pool "destination" is unhealthy: Error: command '/usr/sbin/zpool status destination' failed with output: error!: Process exited with status 1`},
 		},
 		{
 			description:    "NotReady when both pools unhealthy",
 			sourceErr:      true,
 			destinationErr: true,
-			expectStatus:   &zfsbackup.Status{State: "NotReady", Reason: `source pool "source" is unhealthy`},
+			expectStatus:   &zfsbackup.Status{State: zfsbackup.NotReady, Reason: `source pool "source" is unhealthy: Error: command '/usr/sbin/zpool status source' failed with output: error!: Process exited with status 1`},
 		},
+		{
+			description:          "NotReady when source does not have a snapshots schedule",
+			skipSnapshotSchedule: true,
+			expectStatus: &zfsbackup.Status{
+				State:  zfsbackup.NotReady,
+				Reason: `source pool "source" must define .spec.snapshots, either empty (the default schedule) or custom intervals`,
+			},
+		},
+		// TODO require source and destination be different
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
 			run := operator.RunTest(t, TestEnv)
-			source := makePool(t, "source", run, tc.sourceErr)
-			destination := makePool(t, "destination", run, tc.destinationErr)
+			source := makePool(t, "source", run, tc.sourceErr, nil, map[string]*ssh.TestExecResult{
+				"/usr/sbin/zfs send ": {},
+			})
+			if !tc.skipSnapshotSchedule {
+				source.Spec.Snapshots = &zfspool.SnapshotsSpec{}
+				require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &source))
+			}
+			destination := makePool(t, "destination", run, tc.destinationErr, nil, map[string]*ssh.TestExecResult{
+				"/usr/sbin/zfs receive ": {},
+			})
 			backup := zfsbackup.Backup{
 				ObjectMeta: metav1.ObjectMeta{Name: "mybackup", Namespace: run.Namespace},
 				Spec: zfsbackup.Spec{
@@ -86,20 +104,26 @@ func TestBackupReady(t *testing.T) {
 	}
 }
 
-func makePool(tb testing.TB, name string, run operator.TestRunConfig, shouldErr bool) zfspool.Pool {
+func makePool(tb testing.TB, name string, run operator.TestRunConfig, shouldErr bool, execResults, execPrefixResults map[string]*ssh.TestExecResult) zfspool.Pool {
 	tb.Helper()
-	result := &ssh.TestExecResult{
+	poolStateResult := &ssh.TestExecResult{
 		Stdout: []byte(`state: ONLINE`),
 	}
 	if shouldErr {
-		result = &ssh.TestExecResult{
+		poolStateResult = &ssh.TestExecResult{
 			Stdout:   []byte(`error!`),
 			ExitCode: 1,
 		}
 	}
-	sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{ExecResults: map[string]*ssh.TestExecResult{
-		fmt.Sprintf(`/usr/sbin/zpool status %s`, name): result,
-	}})
+	if execResults == nil {
+		execResults = make(map[string]*ssh.TestExecResult)
+	}
+	execResults[fmt.Sprintf(`/usr/sbin/zpool status %s`, name)] = poolStateResult
+
+	sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{
+		ExecResults:       execResults,
+		ExecPrefixResults: execPrefixResults,
+	})
 	const (
 		sshSecretBaseName     = "ssh"
 		sshPrivateKeySelector = "private-key"
@@ -130,4 +154,57 @@ func makePool(tb testing.TB, name string, run operator.TestRunConfig, shouldErr 
 	}
 	require.NoError(tb, TestEnv.Client().Create(TestEnv.Context(), &pool))
 	return pool
+}
+
+func TestBackupSendAndReceive(t *testing.T) {
+	t.Parallel()
+	run := operator.RunTest(t, TestEnv)
+	sourceSSHResults := make(map[string]*ssh.TestExecResult)
+	source := makePool(t, "source", run, false, sourceSSHResults, nil)
+	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
+		Intervals: []zfspool.SnapshotIntervalSpec{
+			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+		},
+	}
+	require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &source))
+	var sourceSnapshot zfspool.PoolSnapshot
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		var sourceSnapshots zfspool.PoolSnapshotList
+		assert.NoError(collect, TestEnv.Client().List(TestEnv.Context(), &sourceSnapshots, &client.ListOptions{Namespace: run.Namespace}))
+		if assert.Len(collect, sourceSnapshots.Items, 1) {
+			sourceSnapshot = *sourceSnapshots.Items[0]
+		}
+	}, maxWait, tick)
+	sourceSSHResults[`/usr/sbin/zfs send --raw --skip-missing source\@`+sourceSnapshot.Name] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
+
+	receiveCalled := false
+	destination := makePool(t, "destination", run, false, map[string]*ssh.TestExecResult{
+		`/usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
+	}, nil)
+
+	const someBackup = "mybackup"
+	backup := zfsbackup.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+		Spec: zfsbackup.Spec{
+			Source:      corev1.LocalObjectReference{Name: source.Name},
+			Destination: corev1.LocalObjectReference{Name: destination.Name},
+		},
+	}
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &backup))
+
+	backup = zfsbackup.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+	}
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
+		assert.Equal(collect, &zfsbackup.Status{
+			State: zfsbackup.Ready,
+		}, backup.Status)
+	}, maxWait, tick)
+	assert.True(t, receiveCalled, "ZFS receive should be called for sent snapshots")
+}
+
+func TestBackupSendAndReceiveIncremental(t *testing.T) {
+	t.Parallel()
+	// TODO
 }

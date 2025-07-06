@@ -31,6 +31,7 @@ type SnapshotReconciler struct {
 
 const (
 	poolNameProperty         = ".spec.pool.name"
+	stateProperty            = ".status.state"
 	snapshotDestroyFinalizer = name.DomainPrefix + "zfs-destroy-snapshot"
 )
 
@@ -46,6 +47,17 @@ func registerSnapshotReconciler(ctx context.Context, manager manager.Manager, cl
 	})
 	if err != nil {
 		return err
+	}
+
+	err = manager.GetFieldIndexer().IndexField(ctx, &PoolSnapshot{}, stateProperty, func(o client.Object) []string {
+		snapshot := o.(*PoolSnapshot)
+		if snapshot.Status == nil {
+			return nil
+		}
+		return []string{string(snapshot.Status.State)}
+	})
+	if err != nil {
+		return errors.WithMessagef(err, "failed to index PoolSnapshot %s", stateProperty)
 	}
 
 	err = manager.GetFieldIndexer().IndexField(ctx, &PoolSnapshot{}, poolNameProperty, func(o client.Object) []string {

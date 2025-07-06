@@ -37,6 +37,11 @@ spec:
                 type: string
               reason:
                 type: string
+              lastSentSnapshot:
+                type: object
+                properties:
+                  name:
+                    type: string
     subresources:
       status: {}
     selectableFields: []

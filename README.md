@@ -19,11 +19,9 @@ A PoolSnapshot represents a set of ZFS dataset snapshots. These are full lifecyc
 A Backup sends incremental ZFS snapshots from the source Pool to its destination Pool. The source Pool must have a snapshot schedule configured.
 The send starts as soon as a PoolSnapshot has completed.
 
-### BackupJob
+In summary, a Backup:
 
-A BackupJob executes a backup. In summary, it:
-
-1. Connects to the Backup's source and destination with WireGuard
+1. Connects to the source and destination (optionally via WireGuard)
 2. Executes `zfs send` on the source over SSH
 3. Executes `zfs receive` on the destination over SSH
 4. Pipes snapshot data from `zfs send` standard output to `zfs receive` standard input

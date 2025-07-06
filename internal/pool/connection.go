@@ -188,3 +188,28 @@ func (c *Connection) ExecCombinedOutput(ctx context.Context, name string, args .
 	}
 	return output, nil
 }
+
+func (c *Connection) ExecWriteStdout(ctx context.Context, out io.WriteCloser, name string, args ...string) error {
+	session, err := c.client.NewSession()
+	if err != nil {
+		return errors.WithMessagef(err, "failed to start session for exec (%s %s)", name, strings.Join(args, " "))
+	}
+	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
+	defer tryNonCriticalCleanup(ctx, currentLine(), out.Close)
+	session.Stdout = out
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+	err = session.Run(safelyFormatCommand(name, args...))
+	return errors.WithMessagef(err, "command '%s %s' failed with stderr output: %s", name, strings.Join(args, " "), &stderr)
+}
+
+func (c *Connection) ExecReadStdin(ctx context.Context, in io.Reader, name string, args ...string) error {
+	session, err := c.client.NewSession()
+	if err != nil {
+		return errors.WithMessagef(err, "failed to start session for exec (%s %s)", name, strings.Join(args, " "))
+	}
+	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
+	session.Stdin = in
+	output, err := session.CombinedOutput(safelyFormatCommand(name, args...))
+	return errors.WithMessagef(err, "command '%s %s' failed with output: %s", name, strings.Join(args, " "), string(output))
+}
