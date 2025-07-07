@@ -189,12 +189,12 @@ func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool P
 		}
 		const zfsDestroyCommand = "destroy"
 		for _, recursiveDataset := range recursiveDatasets {
-			if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone([]string{recursiveDataset}, snapshot.Name, true)); err != nil {
+			if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone([]string{recursiveDataset}, snapshot.Name, true)); ignoreDestroySnapshotNotFound(err) != nil {
 				return "", "", 0, err
 			}
 		}
 		for _, singularDataset := range singularDatasets {
-			if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone([]string{singularDataset}, snapshot.Name, false)); err != nil {
+			if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone([]string{singularDataset}, snapshot.Name, false)); ignoreDestroySnapshotNotFound(err) != nil {
 				return "", "", 0, err
 			}
 		}
@@ -314,4 +314,12 @@ func (r *SnapshotReconciler) childDatasets(ctx context.Context, datasetName stri
 		return name == datasetName
 	})
 	return zfsGetItems, nil
+}
+
+func ignoreDestroySnapshotNotFound(err error) error {
+	var execErr *ExecError
+	if errors.As(err, &execErr) && bytes.Contains(execErr.Output, []byte("could not find any snapshots to destroy")) {
+		return nil
+	}
+	return err
 }

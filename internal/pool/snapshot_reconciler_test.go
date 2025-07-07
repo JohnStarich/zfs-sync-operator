@@ -332,3 +332,77 @@ func TestSnapshotDeleteDestroysZFSSnapshot(t *testing.T) {
 	assert.True(t, destroyCalled1, "ZFS destroy should be called for deleted snapshot 1")
 	assert.True(t, destroyCalled2, "ZFS destroy should be called for deleted snapshot 2")
 }
+
+func TestSnapshotDeleteSkipsWhenNoMatchingSnapshotsFound(t *testing.T) {
+	t.Parallel()
+	const (
+		somePoolName     = "somepool"
+		someSnapshotName = "somesnapshot"
+	)
+	run := operator.RunTest(t, TestEnv)
+	destroyCalled := false
+	sshUser, sshClientPrivateKey, _, sshAddr := ssh.TestServer(t, ssh.TestConfig{ExecResults: map[string]*ssh.TestExecResult{
+		"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
+		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot -r %s/some-dataset\@%s`, somePoolName, someSnapshotName): {ExitCode: 0},
+		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs destroy -r %s/some-dataset\@%s`, somePoolName, someSnapshotName): {
+			Stderr:   []byte(`could not find any snapshots to destroy; check snapshot names.`),
+			ExitCode: 1,
+			Called:   &destroyCalled,
+		},
+	}})
+	const (
+		sshSecretName         = "ssh"
+		sshPrivateKeySelector = "private-key"
+	)
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: sshSecretName, Namespace: run.Namespace},
+		StringData: map[string]string{
+			sshPrivateKeySelector: sshClientPrivateKey,
+		},
+	}))
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: somePoolName, Namespace: run.Namespace},
+		Spec: &zfspool.Spec{
+			Name: somePoolName,
+			SSH: &zfspool.SSHSpec{
+				User:    sshUser,
+				Address: sshAddr.String(),
+				PrivateKey: corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: sshSecretName,
+					},
+					Key: sshPrivateKeySelector,
+				},
+			},
+		},
+	}))
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &zfspool.PoolSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: someSnapshotName, Namespace: run.Namespace},
+		Spec: zfspool.SnapshotSpec{
+			Pool: corev1.LocalObjectReference{Name: somePoolName},
+			SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+				Datasets: []zfspool.DatasetSelector{
+					{Name: fmt.Sprintf("%s/some-dataset", somePoolName), Recursive: &zfspool.RecursiveDatasetSpec{}},
+				},
+			},
+		},
+	}))
+	snapshot := zfspool.PoolSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Name: someSnapshotName, Namespace: run.Namespace},
+	}
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&snapshot), &snapshot))
+		assert.Equal(collect, &zfspool.SnapshotStatus{
+			State: zfspool.SnapshotCompleted,
+		}, snapshot.Status)
+	}, maxWait, tick)
+	require.NoError(t, TestEnv.Client().Delete(TestEnv.Context(), &snapshot))
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		snapshot := zfspool.PoolSnapshot{
+			ObjectMeta: metav1.ObjectMeta{Name: someSnapshotName, Namespace: run.Namespace},
+		}
+		err := TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&snapshot), &snapshot)
+		assert.True(collect, apierrors.IsNotFound(err))
+	}, maxWait, tick)
+	assert.True(t, destroyCalled, "ZFS destroy should be called for deleted snapshot")
+}

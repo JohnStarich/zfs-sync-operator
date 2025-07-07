@@ -183,10 +183,7 @@ func (c *Connection) ExecCombinedOutput(ctx context.Context, name string, args .
 	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
 	output, err := session.CombinedOutput(safelyFormatCommand(name, args...))
 	output = bytes.TrimSpace(output)
-	if err != nil {
-		return output, errors.WithMessagef(err, "command '%s %s' failed with output: %s", name, strings.Join(args, " "), string(output))
-	}
-	return output, nil
+	return output, wrapExecError(name, args, output, err)
 }
 
 // ExecWriteStdout is like [ExecCombinedOutput] but writes stdout to 'out' and closes when execution completes
@@ -201,7 +198,7 @@ func (c *Connection) ExecWriteStdout(ctx context.Context, out io.WriteCloser, na
 	var stderr bytes.Buffer
 	session.Stderr = &stderr
 	err = session.Run(safelyFormatCommand(name, args...))
-	return errors.WithMessagef(err, "command '%s %s' failed with stderr output: %s", name, strings.Join(args, " "), &stderr)
+	return wrapExecError(name, args, stderr.Bytes(), err)
 }
 
 // ExecReadStdin is like [ExecCombinedOutput] but reads stdin from 'in'
@@ -213,5 +210,33 @@ func (c *Connection) ExecReadStdin(ctx context.Context, in io.Reader, name strin
 	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
 	session.Stdin = in
 	output, err := session.CombinedOutput(safelyFormatCommand(name, args...))
-	return errors.WithMessagef(err, "command '%s %s' failed with output: %s", name, strings.Join(args, " "), string(output))
+	return wrapExecError(name, args, output, err)
+}
+
+func wrapExecError(name string, args []string, output []byte, sshExecError error) error {
+	if sshExecError == nil {
+		return nil
+	}
+	return &ExecError{
+		Args:   append([]string{name}, args...),
+		Output: output,
+		Err:    sshExecError,
+	}
+}
+
+type ExecError struct {
+	Args   []string
+	Output []byte
+	Err    error
+}
+
+func (e *ExecError) Error() string {
+	if len(e.Output) > 0 {
+		return fmt.Sprintf("command '%s' failed with output: %s: %s", strings.Join(e.Args, " "), string(e.Output), e.Err)
+	}
+	return fmt.Sprintf("command '%s' failed: %s", strings.Join(e.Args, " "), e.Err)
+}
+
+func (e *ExecError) Unwrap() error {
+	return e.Err
 }
