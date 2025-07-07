@@ -415,10 +415,11 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 	}
 
 	testClock := clock.NewTest()
-	const existingSnapshotsDelta = 30 * time.Minute
+	const defaultExistingSnapshotsDelta = 30 * time.Minute
 	for _, tc := range []struct {
 		description     string
 		snapshotsSpec   *zfspool.SnapshotsSpec
+		existingDelta   time.Duration // defaults to defaultExistingSnapshotsDelta
 		existing        []*zfspool.PoolSnapshot
 		sshConfig       ssh.TestConfig
 		expectSnapshots []*zfspool.PoolSnapshot
@@ -561,7 +562,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -existingSnapshotsDelta).Format(time.RFC3339)},
+						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -defaultExistingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:       map[string]string{nameLabel: "hourly"},
 					},
 					Spec: zfspool.SnapshotSpec{
@@ -592,7 +593,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "hourly-",
-						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -existingSnapshotsDelta).Format(time.RFC3339)},
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -defaultExistingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -608,12 +609,12 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			},
 		},
 		{
-			description: "previous snapshot period elapsed",
+			description: "recent past snapshot interval wait time elapsed",
 			existing: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -2*existingSnapshotsDelta).Format(time.RFC3339)},
+						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -2*defaultExistingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:       map[string]string{nameLabel: "hourly"},
 					},
 					Spec: zfspool.SnapshotSpec{
@@ -644,7 +645,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						GenerateName:    "hourly-",
-						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(existingSnapshotsDelta, -2*existingSnapshotsDelta).Format(time.RFC3339)},
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -2*defaultExistingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
 						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
@@ -677,11 +678,84 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 			},
 		},
+		{
+			description:   "distant past snapshot already completed should skip intervals to single current snapshot",
+			existingDelta: 24 * time.Hour,
+			existing: []*zfspool.PoolSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						GenerateName: "hourly-",
+						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, -24*time.Hour).Format(time.RFC3339)},
+						Labels:       map[string]string{nameLabel: "hourly"},
+					},
+					Spec: zfspool.SnapshotSpec{
+						Pool:     corev1.LocalObjectReference{Name: somePoolName},
+						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, -23*time.Hour)),
+						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+						},
+					},
+					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+				},
+			},
+			snapshotsSpec: &zfspool.SnapshotsSpec{
+				Intervals: []zfspool.SnapshotIntervalSpec{
+					{Name: "hourly", HistoryLimit: 2, Interval: metav1.Duration{Duration: 1 * time.Hour}},
+				},
+				Template: zfspool.SnapshotSpecTemplate{
+					Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+				},
+			},
+			sshConfig: ssh.TestConfig{
+				ExecResults:       map[string]*ssh.TestExecResult{"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0}},
+				ExecPrefixResults: map[string]*ssh.TestExecResult{"/usr/bin/sudo /usr/sbin/zfs snapshot ": {ExitCode: 0}},
+			},
+			expectSnapshots: []*zfspool.PoolSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, -24*time.Hour).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "hourly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
+						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
+					},
+					Spec: zfspool.SnapshotSpec{
+						Pool:     corev1.LocalObjectReference{Name: somePoolName},
+						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, -23*time.Hour)),
+						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+						},
+					},
+					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						GenerateName:    "hourly-",
+						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 0).Format(time.RFC3339)},
+						Labels:          map[string]string{nameLabel: "hourly"},
+						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
+						Finalizers:      []string{name.DomainPrefix + "zfs-destroy-snapshot"},
+					},
+					Spec: zfspool.SnapshotSpec{
+						Pool:     corev1.LocalObjectReference{Name: somePoolName},
+						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, 1*time.Hour)),
+						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+						},
+					},
+					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+				},
+			},
+		},
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
 			run := operator.RunTest(t, TestEnv)
-			run.Clock.Add(-existingSnapshotsDelta)
+			existingDelta := tc.existingDelta
+			if existingDelta == 0 {
+				existingDelta = defaultExistingSnapshotsDelta
+			}
+			run.Clock.Add(-existingDelta)
 			sshUser, sshClientPrivateKey, _, sshAddr := ssh.TestServer(t, tc.sshConfig)
 			const (
 				sshSecretName         = "ssh"
@@ -725,7 +799,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 					assert.Equal(collect, existingSnapshot.Status, statusCheck.Status)
 				}, maxWait, tick, "namespace = %s", run.Namespace)
 			}
-			run.Clock.Add(existingSnapshotsDelta)
+			run.Clock.Add(existingDelta)
 			require.NoError(t, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&pool), &pool))
 			pool.Spec.Snapshots = tc.snapshotsSpec // enable schedule
 			require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &pool))
