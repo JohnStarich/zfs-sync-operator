@@ -49,3 +49,6 @@ spec:
     - jsonPath: .status.state
       name: Status
       type: string
+    - jsonPath: .status.reason
+      name: Details
+      type: string
