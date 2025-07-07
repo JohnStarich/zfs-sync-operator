@@ -44,23 +44,20 @@ func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, co
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	nextTime := nextClosestIntervalBeforeNow(interval, lastTime, now)
+	nextTime := nextSnapshotTime(interval, lastTime, now)
 	beforeNow := nextTime.Before(now) || nextTime.Equal(now)
 	logger.Info("Found completed snapshot, recommending next time after interval", "nextTime", nextTime, "beforeNow", beforeNow)
 	return nextTime, beforeNow, nil
 }
 
-// nextClosestIntervalBeforeNow returns the closest interval after previous but before now.
-// If previous is equal to now, then returns now + interval
-func nextClosestIntervalBeforeNow(interval time.Duration, previous, now time.Time) time.Time {
+// nextSnapshotTime returns the next snapshot time.
+// If the previous snapshot was within 2 intervals, simply return previous + interval.
+// Otherwise, we're too far behind and need to skip to the current interval, so return the nearest interval time to now.
+func nextSnapshotTime(interval time.Duration, previous, now time.Time) time.Time {
 	delta := now.Sub(previous)
-	if interval == 0 || delta < 0 {
-		// These would otherwise be undefined or fatal error behavior. Worst-case this returns now.
-		return now
+	if delta > 2*interval {
+		roundedDownDelta := (delta / interval) * interval
+		return previous.Add(roundedDownDelta)
 	}
-	next := now.Add(-(delta % interval))
-	if delta == 0 {
-		next = next.Add(interval)
-	}
-	return next
+	return previous.Add(interval)
 }
