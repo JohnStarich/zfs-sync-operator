@@ -166,7 +166,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, error
 		return "", err
 	}
 	sendSnapshots := completedSnapshots.Items
-	if backup.Status.LastSentSnapshot != nil {
+	if backup.Status != nil && backup.Status.LastSentSnapshot != nil {
 		lastSentSnapshotIndex := slices.IndexFunc(sendSnapshots, func(snapshot *pool.PoolSnapshot) bool {
 			return snapshot.Name == backup.Status.LastSentSnapshot.Name
 		})
