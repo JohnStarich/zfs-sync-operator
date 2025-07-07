@@ -267,11 +267,12 @@ func TestSnapshotDeleteDestroysZFSSnapshot(t *testing.T) {
 		someSnapshotName = "somesnapshot"
 	)
 	run := operator.RunTest(t, TestEnv)
-	destroyCalled := false
+	destroyCalled1, destroyCalled2 := false, false
 	sshUser, sshClientPrivateKey, _, sshAddr := ssh.TestServer(t, ssh.TestConfig{ExecResults: map[string]*ssh.TestExecResult{
 		"/usr/sbin/zpool status " + somePoolName: {Stdout: []byte(`state: ONLINE`), ExitCode: 0},
-		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot -r %s/some-dataset\@%s`, somePoolName, someSnapshotName): {ExitCode: 0},
-		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs destroy -r %s/some-dataset\@%s`, somePoolName, someSnapshotName):  {ExitCode: 0, Called: &destroyCalled},
+		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs snapshot -r %[1]s/some-dataset-1\@%[2]s %[1]s/some-dataset-2\@%[2]s`, somePoolName, someSnapshotName): {ExitCode: 0},
+		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs destroy -r %s/some-dataset-1\@%s`, somePoolName, someSnapshotName):                                    {ExitCode: 0, Called: &destroyCalled1},
+		fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs destroy -r %s/some-dataset-2\@%s`, somePoolName, someSnapshotName):                                    {ExitCode: 0, Called: &destroyCalled2},
 	}})
 	const (
 		sshSecretName         = "ssh"
@@ -305,7 +306,8 @@ func TestSnapshotDeleteDestroysZFSSnapshot(t *testing.T) {
 			Pool: corev1.LocalObjectReference{Name: somePoolName},
 			SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
 				Datasets: []zfspool.DatasetSelector{
-					{Name: fmt.Sprintf("%s/some-dataset", somePoolName), Recursive: &zfspool.RecursiveDatasetSpec{}},
+					{Name: fmt.Sprintf("%s/some-dataset-1", somePoolName), Recursive: &zfspool.RecursiveDatasetSpec{}},
+					{Name: fmt.Sprintf("%s/some-dataset-2", somePoolName), Recursive: &zfspool.RecursiveDatasetSpec{}},
 				},
 			},
 		},
@@ -327,5 +329,6 @@ func TestSnapshotDeleteDestroysZFSSnapshot(t *testing.T) {
 		err := TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&snapshot), &snapshot)
 		assert.True(collect, apierrors.IsNotFound(err))
 	}, maxWait, tick)
-	assert.True(t, destroyCalled, "ZFS destroy should be called for deleted snapshot")
+	assert.True(t, destroyCalled1, "ZFS destroy should be called for deleted snapshot 1")
+	assert.True(t, destroyCalled2, "ZFS destroy should be called for deleted snapshot 2")
 }

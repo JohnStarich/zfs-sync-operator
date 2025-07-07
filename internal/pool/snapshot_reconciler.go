@@ -188,11 +188,15 @@ func (r *SnapshotReconciler) reconcileWithConnection(ctx context.Context, pool P
 			return snapshot.Status.State, snapshot.Status.Reason, 0, nil
 		}
 		const zfsDestroyCommand = "destroy"
-		if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone(recursiveDatasets, snapshot.Name, true)); err != nil {
-			return "", "", 0, err
+		for _, recursiveDataset := range recursiveDatasets {
+			if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone([]string{recursiveDataset}, snapshot.Name, true)); err != nil {
+				return "", "", 0, err
+			}
 		}
-		if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone(singularDatasets, snapshot.Name, false)); err != nil {
-			return "", "", 0, err
+		for _, singularDataset := range singularDatasets {
+			if err := runZFSCommandIfArgs(ctx, connection, zfsDestroyCommand, formatSnapshotArgsOrNone([]string{singularDataset}, snapshot.Name, false)); err != nil {
+				return "", "", 0, err
+			}
 		}
 
 		snapshot.Finalizers = slices.DeleteFunc(snapshot.Finalizers, func(s string) bool { return s == snapshotDestroyFinalizer })
