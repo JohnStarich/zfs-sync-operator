@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -69,12 +70,13 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 	)); err != nil {
 		return err
 	}
-	if err := ctrl.Watch(source.Kind(
+
+	if err := ctrl.Watch(source.Kind( // Watch pool status for source/destination health
 		manager.GetCache(),
 		&pool.Pool{},
 		handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, pool *pool.Pool) []reconcile.Request {
 			logger := log.FromContext(ctx)
-			allBackups, err := reconciler.matchingBackups(ctx, pool)
+			allBackups, err := reconciler.matchingBackups(ctx, pool.Name, pool.Namespace)
 			if err != nil {
 				logger.Error(err, "Failed to find matching backups for pool", "pool", pool.Name, "namespace", pool.Namespace)
 				return nil
@@ -96,6 +98,33 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 		return err
 	}
 
+	if err := ctrl.Watch(source.Kind( // Watch snapshot status to start sending
+		manager.GetCache(),
+		&pool.PoolSnapshot{},
+		handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, snapshot *pool.PoolSnapshot) []reconcile.Request {
+			logger := log.FromContext(ctx)
+			allBackups, err := reconciler.matchingBackups(ctx, snapshot.Spec.Pool.Name, snapshot.Namespace)
+			if err != nil {
+				logger.Error(err, "Failed to find matching backups for snapshot", "snapshot", snapshot.Name, "namespace", snapshot.Namespace)
+				return nil
+			}
+
+			var requests []reconcile.Request
+			for _, backup := range allBackups {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      backup.Name,
+						Namespace: snapshot.Namespace,
+					},
+				})
+			}
+			logger.Info("Received snapshot update", "matching backups", len(requests))
+			return requests
+		}),
+	)); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -107,24 +136,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err := r.client.Get(ctx, request.NamespacedName, &backup); err != nil {
 		return reconcile.Result{}, err
 	}
-	logger.Info("got backup", "backup", backup.Spec)
-
-	state, reconcileErr := r.reconcile(ctx, backup)
-	var returnErr error
-	if state == "" {
-		state = Error
-		returnErr = reconcileErr
+	logger.Info("got backup", "spec", backup.Spec, "status", backup.Status)
+	if backup.Status == nil { // guard against nil status
+		backup.Status = &Status{}
 	}
-	var reason string
+
+	var reconcileErr error
+	backup.Status.State, reconcileErr = r.reconcile(ctx, &backup)
+	backup.Status.Reason = ""
+
+	var returnErr error
+	if backup.Status.State == "" {
+		backup.Status.State = Error
+		returnErr = reconcileErr
+	} else {
+	}
 	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
-		reason = reconcileErr.Error()
+		backup.Status.Reason = reconcileErr.Error()
 	} else {
-		logger.Info("backup reconciled successfully", "state", state)
-	}
-	backup.Status = &Status{
-		State:  state,
-		Reason: reason,
+		logger.Info("backup reconciled successfully", "status", backup.Status)
 	}
 	if err := r.client.Status().Update(ctx, &backup); err != nil {
 		return reconcile.Result{}, err
@@ -132,7 +163,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return reconcile.Result{}, returnErr
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, error) {
+func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, error) {
+	logger := log.FromContext(ctx)
 	var source, destination pool.Pool
 	if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Source.Name}, &source); err != nil {
 		return "", errors.WithMessage(err, "get source Pool")
@@ -166,18 +198,22 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, error
 		return "", err
 	}
 	sendSnapshots := completedSnapshots.Items
+	logger.Info("Found backup-ready snapshots", "snapshots", len(sendSnapshots))
 	if backup.Status != nil && backup.Status.LastSentSnapshot != nil {
 		lastSentSnapshotIndex := slices.IndexFunc(sendSnapshots, func(snapshot *pool.PoolSnapshot) bool {
 			return snapshot.Name == backup.Status.LastSentSnapshot.Name
 		})
 		if lastSentSnapshotIndex != -1 {
 			sendSnapshots = sendSnapshots[lastSentSnapshotIndex+1:]
+			logger.Info("Found last sent snapshot, using incremental send", "last", backup.Status.LastSentSnapshot.Name, "snapshots", len(sendSnapshots))
 		}
 	}
 	if len(sendSnapshots) == 0 {
+		logger.Info("All snapshots have already been sent, done!")
 		return Ready, nil
 	}
 	sendLastSnapshot := sendSnapshots[len(sendSnapshots)-1]
+	logger.Info("Sending", "snapshot", sendLastSnapshot.Name)
 
 	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
 		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
@@ -191,14 +227,14 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, error
 	return Ready, nil
 }
 
-func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Backup, error) {
+func (r *Reconciler) matchingBackups(ctx context.Context, poolName, poolNamespace string) ([]Backup, error) {
 	var allBackups []Backup
 	{
 		// Fetch all backups with this pool as their source.
 		var sourceBackups BackupList
 		err := r.client.List(ctx, &sourceBackups, &client.ListOptions{
-			FieldSelector: fields.OneTermEqualSelector(sourceProperty, pool.Name),
-			Namespace:     pool.Namespace,
+			FieldSelector: fields.OneTermEqualSelector(sourceProperty, poolName),
+			Namespace:     poolNamespace,
 		})
 		if err != nil {
 			return nil, errors.WithMessage(err, "Failed to list matching source backups")
@@ -211,8 +247,8 @@ func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Ba
 		// There may be duplicates, but this shouldn't matter once they're deduplicated by the event handler.
 		var destinationBackups BackupList
 		err := r.client.List(ctx, &destinationBackups, &client.ListOptions{
-			FieldSelector: fields.OneTermEqualSelector(destinationProperty, pool.Name),
-			Namespace:     pool.Namespace,
+			FieldSelector: fields.OneTermEqualSelector(destinationProperty, poolName),
+			Namespace:     poolNamespace,
 		})
 		if err != nil {
 			return nil, errors.WithMessage(err, "Failed to list matching destination backups")
@@ -222,7 +258,7 @@ func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Ba
 	return allBackups, nil
 }
 
-func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
+func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
 	if snapshot.Status == nil || snapshot.Status.DatasetNames == nil {
 		return errors.Errorf("snapshot %q status does not contain snapshotted dataset names to send: %+v", snapshot.Name, snapshot.Status)
 	}
@@ -232,10 +268,11 @@ func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup Backup, destin
 			return err
 		}
 	}
-	return nil
+	backup.Status.LastSentSnapshot = &corev1.LocalObjectReference{Name: snapshot.Name}
+	return r.client.Status().Update(ctx, backup)
 }
 
-func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
+func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

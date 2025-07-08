@@ -216,7 +216,8 @@ func TestBackupSendAndReceive(t *testing.T) {
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
 		assert.Equal(collect, &zfsbackup.Status{
-			State: zfsbackup.Ready,
+			State:            zfsbackup.Ready,
+			LastSentSnapshot: &corev1.LocalObjectReference{Name: sourceSnapshot.Name},
 		}, backup.Status)
 	}, maxWait, tick)
 	assert.True(t, send1Called, "ZFS send should be called for the snapshot's dataset 1")
@@ -226,5 +227,93 @@ func TestBackupSendAndReceive(t *testing.T) {
 
 func TestBackupSendAndReceiveIncremental(t *testing.T) {
 	t.Parallel()
-	// TODO
+	run := operator.RunTest(t, TestEnv)
+	// Create pools and wait for scheduled snapshot
+	sourceSSHResults := make(map[string]*ssh.TestExecResult)
+	const someDataset = "source/some-dataset"
+	source := makePool(t, "source", run, false, sourceSSHResults, map[string]*ssh.TestExecResult{
+		`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset: {ExitCode: 0},
+	})
+	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
+		Intervals: []zfspool.SnapshotIntervalSpec{
+			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+		},
+		Template: zfspool.SnapshotSpecTemplate{
+			Datasets: []zfspool.DatasetSelector{{Name: someDataset, Recursive: &zfspool.RecursiveDatasetSpec{}}},
+		},
+	}
+	require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &source))
+	var sourceSnapshot zfspool.PoolSnapshot
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		var sourceSnapshots zfspool.PoolSnapshotList
+		assert.NoError(collect, TestEnv.Client().List(TestEnv.Context(), &sourceSnapshots, &client.ListOptions{Namespace: run.Namespace}))
+		if assert.Len(collect, sourceSnapshots.Items, 1) {
+			sourceSnapshot = *sourceSnapshots.Items[0]
+			if assert.NotNil(collect, sourceSnapshot.Status) {
+				assert.Equalf(collect, zfspool.SnapshotCompleted, sourceSnapshot.Status.State, "Status: %v", sourceSnapshot.Status)
+			}
+		}
+	}, maxWait, tick)
+	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate %s\@%s`, someDataset, sourceSnapshot.Name)] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
+
+	receiveCalled := false
+	destination := makePool(t, "destination", run, false, map[string]*ssh.TestExecResult{
+		`/usr/bin/sudo /usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
+	}, nil)
+
+	// Create backup and wait for initial sync
+	const someBackup = "mybackup"
+	backup := zfsbackup.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+		Spec: zfsbackup.Spec{
+			Source:      corev1.LocalObjectReference{Name: source.Name},
+			Destination: corev1.LocalObjectReference{Name: destination.Name},
+		},
+	}
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &backup))
+
+	backup = zfsbackup.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+	}
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
+		assert.Equal(collect, &zfsbackup.Status{
+			State:            zfsbackup.Ready,
+			LastSentSnapshot: &corev1.LocalObjectReference{Name: sourceSnapshot.Name},
+		}, backup.Status)
+	}, maxWait, tick)
+	assert.True(t, receiveCalled, "ZFS receive should be called for sent snapshots")
+
+	// Create next snapshot and wait for incremental sync
+	receiveCalled = false
+	const incrementalSnapshotName = "incremental-snapshot"
+	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate -I \@%s %s\@%s`, sourceSnapshot.Name, someDataset, incrementalSnapshotName)] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
+	incrementalSnapshot := zfspool.PoolSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: incrementalSnapshotName, Namespace: run.Namespace,
+			Annotations: map[string]string{"zfs-sync-operator.johnstarich.com/snapshot-timestamp": run.Clock.RoundedRelativeTime(1*time.Hour, 2*time.Hour).Format(time.RFC3339)},
+		},
+		Spec: zfspool.SnapshotSpec{
+			Pool: corev1.LocalObjectReference{Name: source.Name},
+			SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
+				Datasets: []zfspool.DatasetSelector{{Name: someDataset, Recursive: &zfspool.RecursiveDatasetSpec{}}},
+			},
+		},
+	}
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &incrementalSnapshot))
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&incrementalSnapshot), &incrementalSnapshot))
+		if assert.NotNil(collect, incrementalSnapshot.Status) {
+			assert.Equalf(collect, zfspool.SnapshotCompleted, incrementalSnapshot.Status.State, "Status: %v", incrementalSnapshot.Status)
+		}
+	}, maxWait, tick)
+
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
+		assert.Equal(collect, &zfsbackup.Status{
+			State:            zfsbackup.Ready,
+			LastSentSnapshot: &corev1.LocalObjectReference{Name: incrementalSnapshot.Name},
+		}, backup.Status)
+	}, maxWait, tick)
+	assert.True(t, receiveCalled, "ZFS receive should be called for incrementally sent snapshots")
 }
