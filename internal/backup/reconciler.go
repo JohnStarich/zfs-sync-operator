@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -300,10 +301,11 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, de
 		errs <- sourceConn.ExecWriteStdout(ctx, writer, "/usr/bin/sudo", sendArgs...)
 	}()
 	go func() {
-		errs <- destinationConn.ExecReadStdin(ctx, reader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
+		receiveErr := destinationConn.ExecReadStdin(ctx, reader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
 			"-d", // Preserve hierarchy when using recursive replicated streams
 			destinationPool.Spec.Name,
 		)
+		errs <- ignoreReceiveSnapshotExists(datasetName, receiveErr)
 	}()
 	for range maxErrors {
 		select {
@@ -332,4 +334,12 @@ func validatePoolIsHealthy(contextualName string, p pool.Pool) (returnedErr erro
 	default:
 		return errors.Errorf("%s: %s", p.Status.State, p.Status.Reason)
 	}
+}
+
+func ignoreReceiveSnapshotExists(datasetName string, err error) error {
+	var execErr *pool.ExecError
+	if errors.As(err, &execErr) && bytes.Contains(execErr.Output, fmt.Appendf(nil, "cannot receive new filesystem stream: destination '%s' exists...", datasetName)) {
+		return nil
+	}
+	return err
 }
