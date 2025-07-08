@@ -150,7 +150,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if backup.Status.State == "" {
 		backup.Status.State = Error
 		returnErr = reconcileErr
-	} else {
 	}
 	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")

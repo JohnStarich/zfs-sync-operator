@@ -224,6 +224,8 @@ func wrapExecError(name string, args []string, output []byte, sshExecError error
 	}
 }
 
+// ExecError is returned from executing a command with [Connection].
+// Contains the command metadata and the command's relevant output. If stdout is streamed, then output is stderr.
 type ExecError struct {
 	Args   []string
 	Output []byte
