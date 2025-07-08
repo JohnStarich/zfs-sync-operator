@@ -281,10 +281,17 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, de
 		"--raw",       // Always send raw streams. Must be enabled to avoid decrypting and sending data in the clear.
 		"--replicate", // Copies all data contained in the snapshot - properties, snapshots, descendent file systems, and clones are preserved.
 	}
-	if backup.Status != nil && backup.Status.LastSentSnapshot != nil { // Use incremental send after first send
+	if backup.Status.LastSentSnapshot != nil { // Use incremental send after first send
 		sendArgs = append(sendArgs, "-I", "@"+backup.Status.LastSentSnapshot.Name)
 	}
-	sendArgs = append(sendArgs, fmt.Sprintf("%s@%s", datasetName, snapshotName))
+	fullSnapshotName := fmt.Sprintf("%s@%s", datasetName, snapshotName)
+	sendArgs = append(sendArgs, fullSnapshotName)
+
+	backup.Status.State = Sending
+	backup.Status.Reason = fmt.Sprintf("sending %s", fullSnapshotName)
+	if err := r.client.Status().Update(ctx, backup); err != nil {
+		return err
+	}
 
 	const maxErrors = 2
 	errs := make(chan error, maxErrors)
