@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"time"
 
+	"github.com/johnstarich/go/datasize"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -287,17 +289,12 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, de
 	fullSnapshotName := fmt.Sprintf("%s@%s", datasetName, snapshotName)
 	sendArgs = append(sendArgs, fullSnapshotName)
 
-	backup.Status.State = Sending
-	backup.Status.Reason = fmt.Sprintf("sending %s", fullSnapshotName)
-	if err := r.client.Status().Update(ctx, backup); err != nil {
-		return err
-	}
-
-	const maxErrors = 2
-	errs := make(chan error, maxErrors)
-	reader, writer := io.Pipe() // TODO show progress
+	const maxExpectedErrors = 2
+	errs := make(chan error, maxExpectedErrors)
+	reader, writer := io.Pipe()
+	countWriter := wrapAsCountWriter(writer)
 	go func() {
-		errs <- sourceConn.ExecWriteStdout(ctx, writer, "/usr/bin/sudo", sendArgs...)
+		errs <- sourceConn.ExecWriteStdout(ctx, countWriter, "/usr/bin/sudo", sendArgs...)
 	}()
 	go func() {
 		receiveErr := destinationConn.ExecReadStdin(ctx, reader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
@@ -306,7 +303,24 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, de
 		)
 		errs <- ignoreReceiveSnapshotExists(datasetName, receiveErr)
 	}()
-	for range maxErrors {
+	go func() {
+		const statusUpdateInterval = 30 * time.Second
+		ticker := time.NewTicker(statusUpdateInterval)
+		for {
+			select {
+			case <-ticker.C:
+				backup.Status.State = Sending
+				sentValue, sentUnit := datasize.Bytes(countWriter.Count()).FormatIEC()
+				backup.Status.Reason = fmt.Sprintf("sending %s: sent %.1f %s", fullSnapshotName, sentValue, sentUnit)
+				if err := r.client.Status().Update(ctx, backup); err != nil {
+					errs <- err
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	for range maxExpectedErrors {
 		select {
 		case err := <-errs:
 			if err != nil {
