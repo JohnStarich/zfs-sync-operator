@@ -227,9 +227,9 @@ func (r *Reconciler) reconcileWithConnections(ctx context.Context, backup Backup
 	defer cancel()
 
 	sendArgs := []string{
-		"send",
-		"--raw",          // Always send raw streams. Must be enabled to avoid decrypting and sending data in the clear.
-		"--skip-missing", // Send snapshots with this name, skipping any datasets in the hierarchy missing the snapshot.
+		"/usr/sbin/zfs", "send",
+		"--raw",       // Always send raw streams. Must be enabled to avoid decrypting and sending data in the clear.
+		"--replicate", // Copies all data contained in the snapshot - properties, snapshots, descendent file systems, and clones are preserved.
 	}
 	if backup.Status != nil && backup.Status.LastSentSnapshot != nil { // Use incremental send after first send
 		sendArgs = append(sendArgs, "-I", "@"+backup.Status.LastSentSnapshot.Name)
@@ -240,10 +240,10 @@ func (r *Reconciler) reconcileWithConnections(ctx context.Context, backup Backup
 	errs := make(chan error, maxErrors)
 	reader, writer := io.Pipe() // TODO show progress
 	go func() {
-		errs <- sourceConn.ExecWriteStdout(ctx, writer, "/usr/sbin/zfs", sendArgs...)
+		errs <- sourceConn.ExecWriteStdout(ctx, writer, "/usr/bin/sudo", sendArgs...)
 	}()
 	go func() {
-		errs <- destinationConn.ExecReadStdin(ctx, reader, "/usr/sbin/zfs", "receive",
+		errs <- destinationConn.ExecReadStdin(ctx, reader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
 			"-d", // Preserve hierarchy when using recursive replicated streams
 			destinationPool.Spec.Name,
 		)

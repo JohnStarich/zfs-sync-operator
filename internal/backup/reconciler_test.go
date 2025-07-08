@@ -75,14 +75,14 @@ func TestBackupReady(t *testing.T) {
 			t.Parallel()
 			run := operator.RunTest(t, TestEnv)
 			source := makePool(t, "source", run, tc.sourceErr, nil, map[string]*ssh.TestExecResult{
-				"/usr/sbin/zfs send ": {},
+				"/usr/bin/sudo /usr/sbin/zfs send ": {},
 			})
 			if !tc.skipSnapshotSchedule {
 				source.Spec.Snapshots = &zfspool.SnapshotsSpec{}
 				require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &source))
 			}
 			destination := makePool(t, "destination", run, tc.destinationErr, nil, map[string]*ssh.TestExecResult{
-				"/usr/sbin/zfs receive ": {},
+				"/usr/bin/sudo /usr/sbin/zfs receive ": {},
 			})
 			backup := zfsbackup.Backup{
 				ObjectMeta: metav1.ObjectMeta{Name: "mybackup", Namespace: run.Namespace},
@@ -175,11 +175,11 @@ func TestBackupSendAndReceive(t *testing.T) {
 			sourceSnapshot = *sourceSnapshots.Items[0]
 		}
 	}, maxWait, tick)
-	sourceSSHResults[`/usr/sbin/zfs send --raw --skip-missing source\@`+sourceSnapshot.Name] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
+	sourceSSHResults[`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate source\@`+sourceSnapshot.Name] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
 
 	receiveCalled := false
 	destination := makePool(t, "destination", run, false, map[string]*ssh.TestExecResult{
-		`/usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
+		`/usr/bin/sudo /usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
 	}, nil)
 
 	const someBackup = "mybackup"
