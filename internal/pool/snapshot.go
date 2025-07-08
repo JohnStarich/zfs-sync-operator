@@ -52,8 +52,9 @@ type RecursiveDatasetSpec struct {
 
 // SnapshotStatus holds status information for a [PoolSnapshot]
 type SnapshotStatus struct {
-	State  SnapshotState `json:"state"`
-	Reason string        `json:"reason"`
+	State        SnapshotState `json:"state"`
+	Reason       string        `json:"reason"`
+	DatasetNames *[]string     `json:"datasetNames,omitempty"`
 }
 
 // PoolSnapshotList is a list of [PoolSnapshot]. Required to perform a Watch.

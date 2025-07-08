@@ -569,10 +569,13 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
 						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, 0)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+							Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 						},
 					},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Status: &zfspool.SnapshotStatus{
+						State:        zfspool.SnapshotCompleted,
+						DatasetNames: pointer.Of([]string{somePoolName + "/some-dataset"}),
+					},
 				},
 			},
 			snapshotsSpec: &zfspool.SnapshotsSpec{
@@ -602,7 +605,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
 						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, 0)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+							Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 						},
 					},
 				},
@@ -621,10 +624,13 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
 						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, 0)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+							Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 						},
 					},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Status: &zfspool.SnapshotStatus{
+						State:        zfspool.SnapshotCompleted,
+						DatasetNames: pointer.Of([]string{somePoolName + "/some-dataset"}),
+					},
 				},
 			},
 			snapshotsSpec: &zfspool.SnapshotsSpec{
@@ -654,10 +660,13 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
 						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, 0)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+							Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 						},
 					},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Status: &zfspool.SnapshotStatus{
+						State:        zfspool.SnapshotCompleted,
+						DatasetNames: pointer.Of([]string{somePoolName + "/some-dataset"}),
+					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -674,7 +683,10 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 							Datasets: []zfspool.DatasetSelector{{Name: somePoolName, Recursive: &zfspool.RecursiveDatasetSpec{}}},
 						},
 					},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Status: &zfspool.SnapshotStatus{
+						State:        zfspool.SnapshotCompleted,
+						DatasetNames: pointer.Of([]string{somePoolName}),
+					},
 				},
 			},
 		},
@@ -692,10 +704,13 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
 						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, -23*time.Hour)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+							Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 						},
 					},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Status: &zfspool.SnapshotStatus{
+						State:        zfspool.SnapshotCompleted,
+						DatasetNames: pointer.Of([]string{somePoolName + "/some-dataset"}),
+					},
 				},
 			},
 			snapshotsSpec: &zfspool.SnapshotsSpec{
@@ -703,7 +718,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 					{Name: "hourly", HistoryLimit: 2, Interval: metav1.Duration{Duration: 1 * time.Hour}},
 				},
 				Template: zfspool.SnapshotSpecTemplate{
-					Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+					Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 				},
 			},
 			sshConfig: ssh.TestConfig{
@@ -723,10 +738,13 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
 						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, -23*time.Hour)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+							Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 						},
 					},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Status: &zfspool.SnapshotStatus{
+						State:        zfspool.SnapshotCompleted,
+						DatasetNames: pointer.Of([]string{somePoolName + "/some-dataset"}),
+					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -740,10 +758,13 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
 						Deadline: pointer.Of(testClock.RoundedRelativeMetaV1Time(1*time.Hour, 1*time.Hour)),
 						SnapshotSpecTemplate: zfspool.SnapshotSpecTemplate{
-							Datasets: []zfspool.DatasetSelector{{Name: fmt.Sprintf("%s/some-dataset", somePoolName)}},
+							Datasets: []zfspool.DatasetSelector{{Name: somePoolName + "/some-dataset"}},
 						},
 					},
-					Status: &zfspool.SnapshotStatus{State: zfspool.SnapshotCompleted},
+					Status: &zfspool.SnapshotStatus{
+						State:        zfspool.SnapshotCompleted,
+						DatasetNames: pointer.Of([]string{somePoolName + "/some-dataset"}),
+					},
 				},
 			},
 		},

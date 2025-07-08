@@ -53,6 +53,11 @@ spec:
                 type: string
               reason:
                 type: string
+              datasetNames:
+                type: array
+                minItems: 1
+                items:
+                  type: string
     subresources:
       status: {}
     selectableFields: []

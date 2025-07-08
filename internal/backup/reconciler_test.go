@@ -160,10 +160,23 @@ func TestBackupSendAndReceive(t *testing.T) {
 	t.Parallel()
 	run := operator.RunTest(t, TestEnv)
 	sourceSSHResults := make(map[string]*ssh.TestExecResult)
-	source := makePool(t, "source", run, false, sourceSSHResults, nil)
+	const (
+		someDataset1 = "source/some-dataset-1"
+		someDataset2 = "source/some-dataset-2"
+	)
+	source := makePool(t, "source", run, false, sourceSSHResults, map[string]*ssh.TestExecResult{
+		`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset1: {ExitCode: 0},
+		`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset2: {ExitCode: 0},
+	})
 	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 		Intervals: []zfspool.SnapshotIntervalSpec{
 			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+		},
+		Template: zfspool.SnapshotSpecTemplate{
+			Datasets: []zfspool.DatasetSelector{
+				{Name: someDataset1, Recursive: &zfspool.RecursiveDatasetSpec{}},
+				{Name: someDataset2, Recursive: &zfspool.RecursiveDatasetSpec{}},
+			},
 		},
 	}
 	require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &source))
@@ -173,9 +186,14 @@ func TestBackupSendAndReceive(t *testing.T) {
 		assert.NoError(collect, TestEnv.Client().List(TestEnv.Context(), &sourceSnapshots, &client.ListOptions{Namespace: run.Namespace}))
 		if assert.Len(collect, sourceSnapshots.Items, 1) {
 			sourceSnapshot = *sourceSnapshots.Items[0]
+			if assert.NotNil(collect, sourceSnapshot.Status) {
+				assert.Equalf(collect, zfspool.SnapshotCompleted, sourceSnapshot.Status.State, "Status: %v", sourceSnapshot.Status)
+			}
 		}
 	}, maxWait, tick)
-	sourceSSHResults[`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate source\@`+sourceSnapshot.Name] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
+	send1Called, send2Called := false, false
+	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate %s\@%s`, someDataset1, sourceSnapshot.Name)] = &ssh.TestExecResult{Stdout: []byte(`some data`), Called: &send1Called}
+	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate %s\@%s`, someDataset2, sourceSnapshot.Name)] = &ssh.TestExecResult{Stdout: []byte(`some data`), Called: &send2Called}
 
 	receiveCalled := false
 	destination := makePool(t, "destination", run, false, map[string]*ssh.TestExecResult{
@@ -201,6 +219,8 @@ func TestBackupSendAndReceive(t *testing.T) {
 			State: zfsbackup.Ready,
 		}, backup.Status)
 	}, maxWait, tick)
+	assert.True(t, send1Called, "ZFS send should be called for the snapshot's dataset 1")
+	assert.True(t, send2Called, "ZFS send should be called for the snapshot's dataset 2")
 	assert.True(t, receiveCalled, "ZFS receive should be called for sent snapshots")
 }
 

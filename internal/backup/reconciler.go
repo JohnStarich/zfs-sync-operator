@@ -181,7 +181,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (State, error
 
 	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
 		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
-			return r.reconcileWithConnections(ctx, backup, source, destination, sourceConn, destinationConn, sendLastSnapshot)
+			return r.sendPoolSnapshot(ctx, backup, destination, sourceConn, destinationConn, sendLastSnapshot)
 		})
 	})
 	if err != nil {
@@ -222,7 +222,20 @@ func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Ba
 	return allBackups, nil
 }
 
-func (r *Reconciler) reconcileWithConnections(ctx context.Context, backup Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
+func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
+	if snapshot.Status == nil || snapshot.Status.DatasetNames == nil {
+		return errors.Errorf("snapshot %q status does not contain snapshotted dataset names to send: %+v", snapshot.Name, snapshot.Status)
+	}
+	for _, datasetName := range *snapshot.Status.DatasetNames {
+		err := r.sendDatasetSnapshot(ctx, backup, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name) // TODO guarantee actually unique ID (UID), not just uniquely generated snapshot's name
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -234,7 +247,7 @@ func (r *Reconciler) reconcileWithConnections(ctx context.Context, backup Backup
 	if backup.Status != nil && backup.Status.LastSentSnapshot != nil { // Use incremental send after first send
 		sendArgs = append(sendArgs, "-I", "@"+backup.Status.LastSentSnapshot.Name)
 	}
-	sendArgs = append(sendArgs, fmt.Sprintf("%s@%s", sourcePool.Spec.Name, snapshot.Name)) // TODO guarantee actually unique ID (UID), not just uniquely generated snapshot's name
+	sendArgs = append(sendArgs, fmt.Sprintf("%s@%s", datasetName, snapshotName))
 
 	const maxErrors = 2
 	errs := make(chan error, maxErrors)

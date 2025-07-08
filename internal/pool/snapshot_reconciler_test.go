@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
+	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
 	"github.com/stretchr/testify/assert"
@@ -53,8 +54,9 @@ func TestSnapshot(t *testing.T) {
 				},
 			},
 			expectStatus: &zfspool.SnapshotStatus{
-				State:  zfspool.SnapshotCompleted,
-				Reason: "",
+				State:        zfspool.SnapshotCompleted,
+				Reason:       "",
+				DatasetNames: pointer.Of([]string{someZPoolName + "/some-dataset"}),
 			},
 		},
 		{
@@ -75,8 +77,9 @@ func TestSnapshot(t *testing.T) {
 				},
 			},
 			expectStatus: &zfspool.SnapshotStatus{
-				State:  zfspool.SnapshotPending,
-				Reason: "",
+				State:        zfspool.SnapshotPending,
+				Reason:       "",
+				DatasetNames: pointer.Of([]string{someZPoolName + "/some-dataset"}),
 			},
 		},
 		{
@@ -99,6 +102,10 @@ func TestSnapshot(t *testing.T) {
 			expectStatus: &zfspool.SnapshotStatus{
 				State:  zfspool.SnapshotCompleted,
 				Reason: "",
+				DatasetNames: pointer.Of([]string{
+					someZPoolName + "/some-dataset-1",
+					someZPoolName + "/some-dataset-2",
+				}),
 			},
 		},
 		{
@@ -127,6 +134,10 @@ func TestSnapshot(t *testing.T) {
 			expectStatus: &zfspool.SnapshotStatus{
 				State:  zfspool.SnapshotCompleted,
 				Reason: "",
+				DatasetNames: pointer.Of([]string{
+					someZPoolName + "/some-dataset-1",
+					someZPoolName + "/some-dataset-2",
+				}),
 			},
 		},
 		{
@@ -159,6 +170,10 @@ func TestSnapshot(t *testing.T) {
 			expectStatus: &zfspool.SnapshotStatus{
 				State:  zfspool.SnapshotCompleted,
 				Reason: "",
+				DatasetNames: pointer.Of([]string{
+					someZPoolName + "/some-dataset-1",
+					someZPoolName + "/some-dataset-3",
+				}),
 			},
 		},
 		{
@@ -317,9 +332,9 @@ func TestSnapshotDeleteDestroysZFSSnapshot(t *testing.T) {
 	}
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&snapshot), &snapshot))
-		assert.Equal(collect, &zfspool.SnapshotStatus{
-			State: zfspool.SnapshotCompleted,
-		}, snapshot.Status)
+		if assert.NotNil(collect, snapshot.Status) {
+			assert.Equalf(collect, zfspool.SnapshotCompleted, snapshot.Status.State, "Status: %v", snapshot.Status)
+		}
 	}, maxWait, tick)
 	require.NoError(t, TestEnv.Client().Delete(TestEnv.Context(), &snapshot))
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
@@ -392,9 +407,9 @@ func TestSnapshotDeleteSkipsWhenNoMatchingSnapshotsFound(t *testing.T) {
 	}
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
 		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&snapshot), &snapshot))
-		assert.Equal(collect, &zfspool.SnapshotStatus{
-			State: zfspool.SnapshotCompleted,
-		}, snapshot.Status)
+		if assert.NotNil(collect, snapshot.Status) {
+			assert.Equalf(collect, zfspool.SnapshotCompleted, snapshot.Status.State, "Status: %v", snapshot.Status)
+		}
 	}, maxWait, tick)
 	require.NoError(t, TestEnv.Client().Delete(TestEnv.Context(), &snapshot))
 	require.EventuallyWithT(t, func(collect *assert.CollectT) {
