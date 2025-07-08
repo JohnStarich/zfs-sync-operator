@@ -305,16 +305,21 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, de
 	}()
 	go func() {
 		const statusUpdateInterval = 30 * time.Second
+		lastCount := countWriter.Count()
 		ticker := time.NewTicker(statusUpdateInterval)
 		for {
 			select {
 			case <-ticker.C:
 				backup.Status.State = Sending
-				sentValue, sentUnit := datasize.Bytes(countWriter.Count()).FormatIEC()
-				backup.Status.Reason = fmt.Sprintf("sending %s: sent %.1f %s", fullSnapshotName, sentValue, sentUnit)
+				newCount := countWriter.Count()
+				sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
+				rate := (newCount - lastCount) / int64(statusUpdateInterval/time.Second)
+				rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
+				backup.Status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
 				if err := r.client.Status().Update(ctx, backup); err != nil {
 					errs <- err
 				}
+				lastCount = newCount
 			case <-ctx.Done():
 				return
 			}
