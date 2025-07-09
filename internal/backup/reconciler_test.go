@@ -2,16 +2,21 @@ package backup_test
 
 import (
 	"fmt"
+	"io"
+	"net/netip"
 	"testing"
 	"time"
 
+	"github.com/johnstarich/go/datasize"
 	zfsbackup "github.com/johnstarich/zfs-sync-operator/internal/backup"
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
+	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -73,15 +78,21 @@ func TestBackupReady(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
 			run := operator.RunTest(t, TestEnv)
-			source := makePool(t, "source", run, tc.sourceErr, nil, map[string]*ssh.TestExecResult{
-				"/usr/bin/sudo /usr/sbin/zfs send ": {},
+			source := makePool(t, "source", run, TestPoolOptions{
+				Unhealthy: tc.sourceErr,
+				SSHExecPrefixResults: map[string]*ssh.TestExecResult{
+					"/usr/bin/sudo /usr/sbin/zfs send ": {},
+				},
 			})
 			if !tc.skipSnapshotSchedule {
 				source.Spec.Snapshots = &zfspool.SnapshotsSpec{}
 				require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &source))
 			}
-			destination := makePool(t, "destination", run, tc.destinationErr, nil, map[string]*ssh.TestExecResult{
-				"/usr/bin/sudo /usr/sbin/zfs receive ": {},
+			destination := makePool(t, "destination", run, TestPoolOptions{
+				Unhealthy: tc.destinationErr,
+				SSHExecPrefixResults: map[string]*ssh.TestExecResult{
+					"/usr/bin/sudo /usr/sbin/zfs receive ": {},
+				},
 			})
 			backup := zfsbackup.Backup{
 				ObjectMeta: metav1.ObjectMeta{Name: "mybackup", Namespace: run.Namespace},
@@ -103,54 +114,114 @@ func TestBackupReady(t *testing.T) {
 	}
 }
 
-func makePool(tb testing.TB, name string, run operator.TestRunConfig, shouldErr bool, execResults, execPrefixResults map[string]*ssh.TestExecResult) zfspool.Pool {
+type TestPoolOptions struct {
+	Unhealthy            bool // return an error for 'zpool status' command
+	SSHExecResults       map[string]*ssh.TestExecResult
+	SSHExecPrefixResults map[string]*ssh.TestExecResult
+	WireGuard            bool
+}
+
+func makePool(tb testing.TB, name string, run operator.TestRunConfig, options TestPoolOptions) zfspool.Pool {
 	tb.Helper()
-	poolStateResult := &ssh.TestExecResult{
-		Stdout: []byte(`state: ONLINE`),
+	if options.SSHExecResults == nil {
+		options.SSHExecResults = make(map[string]*ssh.TestExecResult)
 	}
-	if shouldErr {
-		poolStateResult = &ssh.TestExecResult{
+	if options.SSHExecPrefixResults == nil {
+		options.SSHExecPrefixResults = make(map[string]*ssh.TestExecResult)
+	}
+	options.SSHExecPrefixResults[`/usr/sbin/zpool status `] = &ssh.TestExecResult{Stdout: []byte(`state: ONLINE`)}
+	if options.Unhealthy {
+		options.SSHExecPrefixResults[`/usr/sbin/zpool status `] = &ssh.TestExecResult{
 			Stdout:   []byte(`error!`),
 			ExitCode: 1,
 		}
 	}
-	if execResults == nil {
-		execResults = make(map[string]*ssh.TestExecResult)
-	}
-	execResults[fmt.Sprintf(`/usr/sbin/zpool status %s`, name)] = poolStateResult
 
-	sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(tb, ssh.TestConfig{
-		ExecResults:       execResults,
-		ExecPrefixResults: execPrefixResults,
-	})
-	const (
-		sshSecretBaseName     = "ssh"
-		sshPrivateKeySelector = "private-key"
-	)
-	sshSecretName := fmt.Sprintf("%s-%s", name, sshSecretBaseName)
+	sshConfig := ssh.TestConfig{
+		ExecResults:       options.SSHExecResults,
+		ExecPrefixResults: options.SSHExecPrefixResults,
+	}
+	pool := zfspool.Pool{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: run.Namespace},
+		Spec: &zfspool.Spec{
+			Name: name,
+		},
+	}
+
+	if options.WireGuard {
+		presharedKey, err := wgtypes.GenerateKey()
+		require.NoError(tb, err)
+
+		peerPrivateKey, err := wgtypes.GeneratePrivateKey()
+		require.NoError(tb, err)
+		peerPublicKey := peerPrivateKey.PublicKey()
+
+		localPrivateKey, err := wgtypes.GeneratePrivateKey()
+		require.NoError(tb, err)
+		localPublicKey := localPrivateKey.PublicKey()
+
+		remoteWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.2")
+		localWireGuardInterfaceAddr := netip.MustParseAddr("10.3.0.3")
+		wireguardNet, wireguardAddr := wireguard.StartTest(tb, remoteWireGuardInterfaceAddr, presharedKey, peerPrivateKey, localPublicKey)
+		sshConfig.Listener, err = wireguardNet.ListenTCPAddrPort(netip.AddrPortFrom(remoteWireGuardInterfaceAddr, 0))
+		require.NoError(tb, err)
+		tb.Cleanup(func() {
+			require.NoError(tb, sshConfig.Listener.Close())
+		})
+
+		const (
+			wireguardSecretKeyPeerPublicKey   = "peer-public-key"
+			wireguardSecretKeyPresharedKey    = "preshared-key"
+			wireguardSecretKeyLocalPrivateKey = "local-private-key"
+		)
+		wireguardSecretName := "wireguard-" + name
+		require.NoError(tb, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: wireguardSecretName, Namespace: run.Namespace},
+			Data: map[string][]byte{
+				wireguardSecretKeyPeerPublicKey:   peerPublicKey[:],
+				wireguardSecretKeyPresharedKey:    presharedKey[:],
+				wireguardSecretKeyLocalPrivateKey: localPrivateKey[:],
+			},
+		}))
+		pool.Spec.WireGuard = &zfspool.WireGuardSpec{
+			LocalAddress: localWireGuardInterfaceAddr,
+			PeerAddress:  wireguardAddr.String(),
+			PeerPublicKey: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
+				Key:                  wireguardSecretKeyPeerPublicKey,
+			},
+			PresharedKey: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
+				Key:                  wireguardSecretKeyPresharedKey,
+			},
+			LocalPrivateKey: corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: wireguardSecretName},
+				Key:                  wireguardSecretKeyLocalPrivateKey,
+			},
+		}
+	}
+
+	sshUser, sshClientPrivateKey, sshServerPublicKey, sshAddr := ssh.TestServer(tb, sshConfig)
+	const sshPrivateKeySelector = "private-key"
+	sshSecretName := "ssh-" + name
 	require.NoError(tb, TestEnv.Client().Create(TestEnv.Context(), &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: sshSecretName, Namespace: run.Namespace},
 		StringData: map[string]string{
 			sshPrivateKeySelector: sshClientPrivateKey,
 		},
 	}))
-	pool := zfspool.Pool{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: run.Namespace},
-		Spec: &zfspool.Spec{
-			Name: name,
-			SSH: &zfspool.SSHSpec{
-				User:    sshUser,
-				Address: sshAddr.String(),
-				HostKey: sshServerPublicKey,
-				PrivateKey: corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: sshSecretName,
-					},
-					Key: sshPrivateKeySelector,
-				},
+	pool.Spec.SSH = &zfspool.SSHSpec{
+		User:    sshUser,
+		Address: sshAddr.String(),
+		HostKey: sshServerPublicKey,
+		PrivateKey: corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{
+				Name: sshSecretName,
 			},
+			Key: sshPrivateKeySelector,
 		},
 	}
+
 	require.NoError(tb, TestEnv.Client().Create(TestEnv.Context(), &pool))
 	return pool
 }
@@ -163,9 +234,12 @@ func TestBackupSendAndReceive(t *testing.T) {
 		someDataset1 = "source/some-dataset-1"
 		someDataset2 = "source/some-dataset-2"
 	)
-	source := makePool(t, "source", run, false, sourceSSHResults, map[string]*ssh.TestExecResult{
-		`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset1: {ExitCode: 0},
-		`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset2: {ExitCode: 0},
+	source := makePool(t, "source", run, TestPoolOptions{
+		SSHExecResults: sourceSSHResults,
+		SSHExecPrefixResults: map[string]*ssh.TestExecResult{
+			`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset1: {ExitCode: 0},
+			`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset2: {ExitCode: 0},
+		},
 	})
 	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 		Intervals: []zfspool.SnapshotIntervalSpec{
@@ -195,9 +269,11 @@ func TestBackupSendAndReceive(t *testing.T) {
 	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate %s\@%s`, someDataset2, sourceSnapshot.Name)] = &ssh.TestExecResult{Stdout: []byte(`some data`), Called: &send2Called}
 
 	receiveCalled := false
-	destination := makePool(t, "destination", run, false, map[string]*ssh.TestExecResult{
-		`/usr/bin/sudo /usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
-	}, nil)
+	destination := makePool(t, "destination", run, TestPoolOptions{
+		SSHExecResults: map[string]*ssh.TestExecResult{
+			`/usr/bin/sudo /usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
+		},
+	})
 
 	const someBackup = "mybackup"
 	backup := zfsbackup.Backup{
@@ -230,8 +306,11 @@ func TestBackupSendAndReceiveIncremental(t *testing.T) {
 	// Create pools and wait for scheduled snapshot
 	sourceSSHResults := make(map[string]*ssh.TestExecResult)
 	const someDataset = "source/some-dataset"
-	source := makePool(t, "source", run, false, sourceSSHResults, map[string]*ssh.TestExecResult{
-		`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset: {ExitCode: 0},
+	source := makePool(t, "source", run, TestPoolOptions{
+		SSHExecResults: sourceSSHResults,
+		SSHExecPrefixResults: map[string]*ssh.TestExecResult{
+			`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset: {ExitCode: 0},
+		},
 	})
 	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 		Intervals: []zfspool.SnapshotIntervalSpec{
@@ -256,9 +335,11 @@ func TestBackupSendAndReceiveIncremental(t *testing.T) {
 	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate %s\@%s`, someDataset, sourceSnapshot.Name)] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
 
 	receiveCalled := false
-	destination := makePool(t, "destination", run, false, map[string]*ssh.TestExecResult{
-		`/usr/bin/sudo /usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
-	}, nil)
+	destination := makePool(t, "destination", run, TestPoolOptions{
+		SSHExecResults: map[string]*ssh.TestExecResult{
+			`/usr/bin/sudo /usr/sbin/zfs receive -d destination`: {ExpectStdin: []byte(`some data`), Called: &receiveCalled},
+		},
+	})
 
 	// Create backup and wait for initial sync
 	const someBackup = "mybackup"
@@ -315,4 +396,118 @@ func TestBackupSendAndReceiveIncremental(t *testing.T) {
 		}, backup.Status)
 	}, maxWait, tick)
 	assert.True(t, receiveCalled, "ZFS receive should be called for incrementally sent snapshots")
+}
+
+type zeroReader struct{}
+
+func (z zeroReader) Read(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func BenchmarkSendSpeed(b *testing.B) {
+	const maxWait = maxWait * 2 // double wait time in benchmark
+	for _, tc := range []struct {
+		description         string
+		source, destination TestPoolOptions
+	}{
+		{
+			description: "SSH to SSH",
+			source:      TestPoolOptions{},
+			destination: TestPoolOptions{},
+		},
+		{
+			description: "SSH to WireGuard",
+			source:      TestPoolOptions{},
+			destination: TestPoolOptions{WireGuard: true},
+		},
+		{
+			description: "WireGuard to SSH",
+			source:      TestPoolOptions{WireGuard: true},
+			destination: TestPoolOptions{},
+		},
+		{
+			description: "WireGuard to WireGuard",
+			source:      TestPoolOptions{WireGuard: true},
+			destination: TestPoolOptions{WireGuard: true},
+		},
+	} {
+		b.Run(tc.description, func(b *testing.B) {
+			iterationBytes := datasize.Mebibytes(1).Bytes()
+			bytes := int64(b.N) * iterationBytes
+			b.SetBytes(iterationBytes)
+
+			run := operator.RunTest(b, TestEnv)
+			tc.source.SSHExecPrefixResults = map[string]*ssh.TestExecResult{
+				`/usr/sbin/zpool status `:               {Stdout: []byte(`state: ONLINE`)},
+				`/usr/bin/sudo /usr/sbin/zfs snapshot `: {ExitCode: 0},
+				`/usr/bin/sudo /usr/sbin/zfs send `:     {StdoutReader: io.LimitReader(zeroReader{}, bytes)}, // TODO randomize data to ensure compression isn't helping?
+			}
+			source := makePool(b, "source", run, tc.source)
+			const someDataset = "source/some-dataset-1"
+			source.Spec.Snapshots = &zfspool.SnapshotsSpec{
+				Intervals: []zfspool.SnapshotIntervalSpec{
+					{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+				},
+				Template: zfspool.SnapshotSpecTemplate{
+					Datasets: []zfspool.DatasetSelector{
+						{Name: someDataset, Recursive: &zfspool.RecursiveDatasetSpec{}},
+					},
+				},
+			}
+			require.NoError(b, TestEnv.Client().Update(TestEnv.Context(), &source))
+			var sourceSnapshot zfspool.PoolSnapshot
+			require.EventuallyWithT(b, func(collect *assert.CollectT) {
+				var sourceSnapshots zfspool.PoolSnapshotList
+				assert.NoError(collect, TestEnv.Client().List(TestEnv.Context(), &sourceSnapshots, &client.ListOptions{Namespace: run.Namespace}))
+				if assert.Len(collect, sourceSnapshots.Items, 1) {
+					sourceSnapshot = *sourceSnapshots.Items[0]
+					if assert.NotNil(collect, sourceSnapshot.Status) {
+						assert.Equalf(collect, zfspool.SnapshotCompleted, sourceSnapshot.Status.State, "Status: %v", sourceSnapshot.Status)
+					}
+				}
+			}, maxWait, tick)
+
+			receiveCalled := false
+			tc.destination.SSHExecPrefixResults = map[string]*ssh.TestExecResult{
+				`/usr/sbin/zpool status `:              {Stdout: []byte(`state: ONLINE`)},
+				`/usr/bin/sudo /usr/sbin/zfs receive `: {ReadStdin: true, Called: &receiveCalled},
+			}
+			destination := makePool(b, "destination", run, tc.destination)
+
+			const someBackup = "mybackup"
+			backup := zfsbackup.Backup{
+				ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+				Spec: zfsbackup.Spec{
+					Source:      corev1.LocalObjectReference{Name: source.Name},
+					Destination: corev1.LocalObjectReference{Name: destination.Name},
+				},
+			}
+			require.NoError(b, TestEnv.Client().Create(TestEnv.Context(), &backup))
+
+			watcher, err := TestEnv.Client().Watch(TestEnv.Context(), &zfsbackup.BackupList{}, &client.ListOptions{
+				Namespace: run.Namespace,
+			})
+			require.NoError(b, err)
+			startedSending := false
+			for event := range watcher.ResultChan() {
+				backup, ok := event.Object.(*zfsbackup.Backup)
+				if ok && backup.Status != nil {
+					b.Log("Backup state:", backup.Status.State, backup.Status.Reason)
+					switch backup.Status.State {
+					case zfsbackup.Ready:
+						if startedSending && backup.Status.LastSentSnapshot != nil && backup.Status.LastSentSnapshot.Name == sourceSnapshot.Name {
+							b.StopTimer()
+							watcher.Stop()
+						}
+					case zfsbackup.Sending:
+						if !startedSending {
+							b.ResetTimer()
+						}
+						startedSending = true
+					}
+				}
+			}
+			assert.True(b, receiveCalled, "ZFS receive should be called for sent snapshots")
+		})
+	}
 }

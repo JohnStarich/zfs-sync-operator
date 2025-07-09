@@ -24,7 +24,7 @@ import (
 type Runner struct {
 	ctx      context.Context
 	env      *envtest.Environment
-	client   client.Client
+	client   client.WithWatch
 	runTests func() int
 	scheme   *runtime.Scheme
 }
@@ -71,7 +71,7 @@ func (r *Runner) RESTConfig() *rest.Config {
 }
 
 // Client should be used to interact with the test kube-apiserver
-func (r *Runner) Client() client.Client {
+func (r *Runner) Client() client.WithWatch {
 	return r.client
 }
 
@@ -146,7 +146,7 @@ func (r *Runner) setUp(ctx context.Context, out io.Writer) (returnedErr error) {
 			return err
 		}
 	}
-	r.client, err = client.New(r.env.Config, client.Options{
+	r.client, err = client.NewWithWatch(r.env.Config, client.Options{
 		Scheme: r.scheme,
 	})
 	if err != nil {

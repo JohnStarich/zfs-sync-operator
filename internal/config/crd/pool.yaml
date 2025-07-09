@@ -42,10 +42,6 @@ spec:
               wireguard:
                 type: object
                 properties:
-                  dnsAddresses:
-                    type: array
-                    items:
-                      type: string
                   localAddress:
                     type: string
                   localPrivateKey:

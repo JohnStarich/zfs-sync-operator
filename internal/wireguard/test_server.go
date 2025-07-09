@@ -7,9 +7,9 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/netstack"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	"github.com/stretchr/testify/require"
-	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 

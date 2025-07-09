@@ -1,7 +1,6 @@
 package backup
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -9,9 +8,11 @@ import (
 	"time"
 
 	"github.com/johnstarich/go/datasize"
+	"github.com/johnstarich/zfs-sync-operator/internal/iocount"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -219,7 +220,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, erro
 
 	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
 		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
-			return r.sendPoolSnapshot(ctx, backup, destination, sourceConn, destinationConn, sendLastSnapshot)
+			return r.sendPoolSnapshot(ctx, backup, source, destination, sourceConn, destinationConn, sendLastSnapshot)
 		})
 	})
 	if err != nil {
@@ -260,12 +261,12 @@ func (r *Reconciler) matchingBackups(ctx context.Context, poolName, poolNamespac
 	return allBackups, nil
 }
 
-func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
+func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
 	if snapshot.Status == nil || snapshot.Status.DatasetNames == nil {
 		return errors.Errorf("snapshot %q status does not contain snapshotted dataset names to send: %+v", snapshot.Name, snapshot.Status)
 	}
 	for _, datasetName := range *snapshot.Status.DatasetNames {
-		err := r.sendDatasetSnapshot(ctx, backup, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
+		err := r.sendDatasetSnapshot(ctx, backup, sourcePool, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
 		if err != nil {
 			return err
 		}
@@ -274,7 +275,8 @@ func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, desti
 	return r.client.Status().Update(ctx, backup)
 }
 
-func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
+func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
+	logger := log.FromContext(ctx)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -291,40 +293,43 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, de
 
 	const maxExpectedErrors = 2
 	errs := make(chan error, maxExpectedErrors)
-	reader, writer := io.Pipe()
-	countWriter := wrapAsCountWriter(writer)
+	pipeReader, pipeWriter := io.Pipe()
+	countWriter := iocount.NewWriter(pipeWriter)
 	go func() {
 		errs <- sourceConn.ExecWriteStdout(ctx, countWriter, "/usr/bin/sudo", sendArgs...)
 	}()
 	go func() {
-		receiveErr := destinationConn.ExecReadStdin(ctx, reader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
+		errs <- destinationConn.ExecReadStdin(ctx, pipeReader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
 			"-d", // Preserve hierarchy when using recursive replicated streams
 			destinationPool.Spec.Name,
 		)
-		errs <- ignoreReceiveSnapshotExists(datasetName, receiveErr)
 	}()
 	go func() {
 		const statusUpdateInterval = 30 * time.Second
 		lastCount := countWriter.Count()
 		ticker := time.NewTicker(statusUpdateInterval)
 		for {
+			status := Status{
+				State: Sending,
+			}
+			newCount := countWriter.Count()
+			sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
+			rate := (newCount - lastCount) / int64(statusUpdateInterval/time.Second)
+			rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
+			status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
+
+			lastCount = newCount
+			if err := r.patchStatus(ctx, backup.Namespace, backup.Name, status); err != nil {
+				logger.Error(err, "Failed to patch status for Sending")
+			}
 			select {
 			case <-ticker.C:
-				backup.Status.State = Sending
-				newCount := countWriter.Count()
-				sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
-				rate := (newCount - lastCount) / int64(statusUpdateInterval/time.Second)
-				rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
-				backup.Status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
-				if err := r.client.Status().Update(ctx, backup); err != nil {
-					errs <- err
-				}
-				lastCount = newCount
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
+
 	for range maxExpectedErrors {
 		select {
 		case err := <-errs:
@@ -354,10 +359,9 @@ func validatePoolIsHealthy(contextualName string, p pool.Pool) (returnedErr erro
 	}
 }
 
-func ignoreReceiveSnapshotExists(datasetName string, err error) error {
-	var execErr *pool.ExecError
-	if errors.As(err, &execErr) && bytes.Contains(execErr.Output, fmt.Appendf(nil, "cannot receive new filesystem stream: destination '%s' exists...", datasetName)) {
-		return nil
-	}
-	return err
+func (r *Reconciler) patchStatus(ctx context.Context, namespace, name string, status Status) error {
+	return r.client.Status().Patch(ctx, &Backup{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		Status:     &status,
+	}, client.Merge)
 }

@@ -6,21 +6,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/netip"
+	"time"
 
+	"github.com/johnstarich/zfs-sync-operator/internal/netstack"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
-	"golang.zx2c4.com/wireguard/tun/netstack"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 // Config contains data to configure a WireGuard connection
 type Config struct {
-	DNSAddresses    []netip.Addr // Defaults to CloudFlare DNS (1.0.0.1, 1.1.1.1).
-	ListenPort      int          // Optional: The port number to listen for WireGuard connections.
+	ListenPort      int // Optional: The port number to listen for WireGuard connections.
 	LocalAddress    netip.Addr
 	LocalPrivateKey []byte
 	LogHandler      slog.Handler // Defaults to slog.Default().
@@ -69,15 +70,31 @@ func Start(ctx context.Context, config Config) (*netstack.Net, error) {
 	if config.LogHandler != nil {
 		logger = slog.New(config.LogHandler)
 	}
-	iface := newInterface(logger, config.LocalAddress, config.DNSAddresses)
+	iface := newInterface(logger, config.LocalAddress)
 	device, dialer, err := iface.Start(ctx)
 	if err != nil {
 		return nil, err
 	}
 	go func() {
 		err := iface.Wait()
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("Failed on wait for interface", slog.Any("error", err))
+		}
+	}()
+	go func() {
+		const statsLogInterval = 30 * time.Second
+		for {
+			stats, err := encodableStats(dialer.Stats())
+			if err == nil {
+				logger.Info("WireGuard netstack stats", "stats", stats)
+			} else {
+				logger.Error("Failed to encode WireGuard netstack stats", "error", err)
+			}
+			select {
+			case <-time.After(statsLogInterval):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 

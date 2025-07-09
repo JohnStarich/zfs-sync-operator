@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -68,7 +67,7 @@ func TestConnectToHTTPServer(t *testing.T) {
 
 func startHTTPServer(t *testing.T, addr netip.Addr, presharedKey, privateKey, peerPublicKey wgtypes.Key, message string) netip.AddrPort {
 	serverNet, addrPort := StartTest(t, addr, presharedKey, privateKey, peerPublicKey)
-	listener, err := serverNet.ListenTCP(&net.TCPAddr{Port: 80})
+	listener, err := serverNet.ListenTCPAddrPort(netip.AddrPortFrom(netip.Addr{}, 80))
 	require.NoError(t, err)
 
 	server := http.Server{

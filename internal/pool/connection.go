@@ -155,7 +155,6 @@ func (p *Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) 
 		}
 
 		wireGuardNet, err := wireguard.Start(ctx, wireguard.Config{
-			DNSAddresses:    wireGuardSpec.DNSAddresses,
 			LocalAddress:    wireGuardSpec.LocalAddress,
 			LocalPrivateKey: localPrivateKey,
 			LogHandler:      logr.ToSlogHandler(logger),
