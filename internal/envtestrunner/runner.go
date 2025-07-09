@@ -140,7 +140,11 @@ func (r *Runner) setUp(ctx context.Context, out io.Writer) (returnedErr error) {
 	}
 	_, err = r.env.Start()
 	if err != nil {
-		return err
+		r.env.AttachControlPlaneOutput = true
+		_, err = r.env.Start()
+		if err != nil {
+			return err
+		}
 	}
 	r.client, err = client.New(r.env.Config, client.Options{
 		Scheme: r.scheme,

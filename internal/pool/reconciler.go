@@ -5,11 +5,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/clock"
+	"github.com/johnstarich/zfs-sync-operator/internal/idgen"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -37,15 +37,17 @@ type Reconciler struct {
 	client         client.Client
 	clock          clock.Clock
 	maxSessionWait time.Duration
+	uuidGenerator  idgen.IDGenerator
 }
 
 // RegisterReconciler registers a Pool reconciler with manager
-func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSessionWait time.Duration, clock clock.Clock) error {
+func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSessionWait time.Duration, clock clock.Clock, uuidGenerator idgen.IDGenerator) error {
 	ctrl, err := controller.New("pool", manager, controller.Options{
 		Reconciler: &Reconciler{
 			client:         manager.GetClient(),
-			maxSessionWait: maxSessionWait,
 			clock:          clock,
+			maxSessionWait: maxSessionWait,
+			uuidGenerator:  uuidGenerator,
 		},
 	})
 	if err != nil {
@@ -170,10 +172,10 @@ func (r *Reconciler) reconcileSnapshotInterval(ctx context.Context, now time.Tim
 			deadline := nextTime.Add(interval.Interval.Duration)
 			snapshot := PoolSnapshot{
 				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: interval.Name + "-",
-					Namespace:    pool.Namespace,
-					Labels:       map[string]string{snapshotIntervalLabel: interval.Name},
-					Annotations:  map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
+					Name:        fmt.Sprintf("%s-%s", interval.Name, r.uuidGenerator.MustNewID()),
+					Namespace:   pool.Namespace,
+					Labels:      map[string]string{snapshotIntervalLabel: interval.Name},
+					Annotations: map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
 				},
 				Spec: SnapshotSpec{
 					Pool:                 corev1.LocalObjectReference{Name: pool.Name},
@@ -281,45 +283,4 @@ func dropRight[Value any](values []Value, n uint) []Value {
 
 func unsignedLen[Value any](values []Value) uint {
 	return uint(len(values))
-}
-
-// SortScheduledSnapshots sorts snapshots by their scheduled timestamp.
-// This only applies to PoolSnapshots created by a Pool's snapshots configuration.
-// If any snapshot is encountered with an invalid timestamp, the sort fails.
-func SortScheduledSnapshots(snapshots []*PoolSnapshot) error {
-	var sortErr error
-	slices.SortFunc(snapshots, func(a, b *PoolSnapshot) int {
-		annotationA, annotationB := a.Annotations[snapshotTimestampAnnotation], b.Annotations[snapshotTimestampAnnotation]
-		timeA, err := time.Parse(time.RFC3339, annotationA)
-		if sortErr == nil && err != nil {
-			sortErr = errors.WithMessagef(err, "pool snapshot %s", b.Name)
-			return 0
-		}
-		timeB, err := time.Parse(time.RFC3339, annotationB)
-		if sortErr == nil && err != nil {
-			sortErr = errors.WithMessagef(err, "pool snapshot %s", b.Name)
-			return 0
-		}
-		return timeA.Compare(timeB)
-	})
-	return sortErr
-}
-
-func nextSnapshot(ctx context.Context, now time.Time, interval time.Duration, completedSnapshots []*PoolSnapshot) (time.Time, bool, error) {
-	logger := log.FromContext(ctx)
-	now = now.UTC()
-	if len(completedSnapshots) == 0 {
-		nextTime := now.Round(interval).Add(interval)
-		logger.Info("No completed snapshots, recommending next snapshot time", "nextTime", nextTime)
-		return nextTime, true, nil
-	}
-	last := completedSnapshots[len(completedSnapshots)-1]
-	lastTime, err := time.Parse(time.RFC3339, last.Annotations[snapshotTimestampAnnotation])
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	nextTime := lastTime.Add(interval)
-	beforeNow := nextTime.Before(now) || nextTime.Equal(now)
-	logger.Info("Found completed snapshot, recommending next time after interval", "nextTime", nextTime, "beforeNow", beforeNow)
-	return nextTime, beforeNow, nil
 }

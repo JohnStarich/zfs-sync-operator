@@ -183,8 +183,62 @@ func (c *Connection) ExecCombinedOutput(ctx context.Context, name string, args .
 	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
 	output, err := session.CombinedOutput(safelyFormatCommand(name, args...))
 	output = bytes.TrimSpace(output)
+	return output, wrapExecError(name, args, output, err)
+}
+
+// ExecWriteStdout is like [ExecCombinedOutput] but writes stdout to 'out' and closes when execution completes
+func (c *Connection) ExecWriteStdout(ctx context.Context, out io.WriteCloser, name string, args ...string) error {
+	session, err := c.client.NewSession()
 	if err != nil {
-		return output, errors.WithMessagef(err, "command '%s %s' failed with output: %s", name, strings.Join(args, " "), string(output))
+		return errors.WithMessagef(err, "failed to start session for exec (%s %s)", name, strings.Join(args, " "))
 	}
-	return output, nil
+	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
+	defer tryNonCriticalCleanup(ctx, currentLine(), out.Close)
+	session.Stdout = out
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+	err = session.Run(safelyFormatCommand(name, args...))
+	return wrapExecError(name, args, stderr.Bytes(), err)
+}
+
+// ExecReadStdin is like [ExecCombinedOutput] but reads stdin from 'in'
+func (c *Connection) ExecReadStdin(ctx context.Context, in io.Reader, name string, args ...string) error {
+	session, err := c.client.NewSession()
+	if err != nil {
+		return errors.WithMessagef(err, "failed to start session for exec (%s %s)", name, strings.Join(args, " "))
+	}
+	defer tryNonCriticalCleanup(ctx, currentLine(), session.Close)
+	session.Stdin = in
+	output, err := session.CombinedOutput(safelyFormatCommand(name, args...))
+	return wrapExecError(name, args, output, err)
+}
+
+func wrapExecError(name string, args []string, output []byte, sshExecError error) error {
+	if sshExecError == nil {
+		return nil
+	}
+	return &ExecError{
+		Args:   append([]string{name}, args...),
+		Output: output,
+		Err:    sshExecError,
+	}
+}
+
+// ExecError is returned from executing a command with [Connection].
+// Contains the command metadata and the command's relevant output. If stdout is streamed, then output is stderr.
+type ExecError struct {
+	Args   []string
+	Output []byte
+	Err    error
+}
+
+func (e *ExecError) Error() string {
+	if len(e.Output) > 0 {
+		return fmt.Sprintf("command '%s' failed with output: %s: %s", strings.Join(e.Args, " "), string(e.Output), e.Err)
+	}
+	return fmt.Sprintf("command '%s' failed: %s", strings.Join(e.Args, " "), e.Err)
+}
+
+func (e *ExecError) Unwrap() error {
+	return e.Err
 }

@@ -37,10 +37,18 @@ spec:
                 type: string
               reason:
                 type: string
+              lastSentSnapshot:
+                type: object
+                properties:
+                  name:
+                    type: string
     subresources:
       status: {}
     selectableFields: []
     additionalPrinterColumns:
     - jsonPath: .status.state
       name: Status
+      type: string
+    - jsonPath: .status.reason
+      name: Details
       type: string

@@ -1,11 +1,17 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"slices"
+	"time"
 
+	"github.com/johnstarich/go/datasize"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,13 +46,21 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 	}
 
 	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, sourceProperty, func(o client.Object) []string {
-		return []string{o.(*Backup).Spec.Source.Name}
+		backup := o.(*Backup)
+		if backup.Status == nil {
+			return nil
+		}
+		return []string{backup.Spec.Source.Name}
 	})
 	if err != nil {
 		return errors.WithMessagef(err, "failed to index Backup %s", sourceProperty)
 	}
 	err = manager.GetFieldIndexer().IndexField(ctx, &Backup{}, destinationProperty, func(o client.Object) []string {
-		return []string{o.(*Backup).Spec.Destination.Name}
+		backup := o.(*Backup)
+		if backup.Status == nil {
+			return nil
+		}
+		return []string{backup.Spec.Destination.Name}
 	})
 	if err != nil {
 		return errors.WithMessagef(err, "failed to index Backup %s", destinationProperty)
@@ -59,12 +73,13 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 	)); err != nil {
 		return err
 	}
-	if err := ctrl.Watch(source.Kind(
+
+	if err := ctrl.Watch(source.Kind( // Watch pool status for source/destination health
 		manager.GetCache(),
 		&pool.Pool{},
 		handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, pool *pool.Pool) []reconcile.Request {
 			logger := log.FromContext(ctx)
-			allBackups, err := reconciler.matchingBackups(ctx, pool)
+			allBackups, err := reconciler.matchingBackups(ctx, pool.Name, pool.Namespace)
 			if err != nil {
 				logger.Error(err, "Failed to find matching backups for pool", "pool", pool.Name, "namespace", pool.Namespace)
 				return nil
@@ -79,6 +94,34 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 					},
 				})
 			}
+			logger.Info("Received pool update", "matching backups", len(requests))
+			return requests
+		}),
+	)); err != nil {
+		return err
+	}
+
+	if err := ctrl.Watch(source.Kind( // Watch snapshot status to start sending
+		manager.GetCache(),
+		&pool.PoolSnapshot{},
+		handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, snapshot *pool.PoolSnapshot) []reconcile.Request {
+			logger := log.FromContext(ctx)
+			allBackups, err := reconciler.matchingBackups(ctx, snapshot.Spec.Pool.Name, snapshot.Namespace)
+			if err != nil {
+				logger.Error(err, "Failed to find matching backups for snapshot", "snapshot", snapshot.Name, "namespace", snapshot.Namespace)
+				return nil
+			}
+
+			var requests []reconcile.Request
+			for _, backup := range allBackups {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      backup.Name,
+						Namespace: snapshot.Namespace,
+					},
+				})
+			}
+			logger.Info("Received snapshot update", "matching backups", len(requests))
 			return requests
 		}),
 	)); err != nil {
@@ -96,52 +139,104 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err := r.client.Get(ctx, request.NamespacedName, &backup); err != nil {
 		return reconcile.Result{}, err
 	}
-	logger.Info("got backup", "backup", backup.Spec)
+	logger.Info("got backup", "spec", backup.Spec, "status", backup.Status)
+	if backup.Status == nil { // guard against nil status
+		backup.Status = &Status{}
+	}
 
-	state, reason, reconcileErr := r.reconcile(ctx, backup)
+	var reconcileErr error
+	backup.Status.State, reconcileErr = r.reconcile(ctx, &backup)
+	backup.Status.Reason = ""
+
+	var returnErr error
+	if backup.Status.State == "" {
+		backup.Status.State = Error
+		returnErr = reconcileErr
+	}
 	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
-		state = "Error"
-		reason = reconcileErr.Error()
+		backup.Status.Reason = reconcileErr.Error()
 	} else {
-		logger.Info("backup reconciled successfully", "state", state)
-	}
-	backup.Status = &Status{
-		State:  state,
-		Reason: reason,
+		logger.Info("backup reconciled successfully", "status", backup.Status)
 	}
 	if err := r.client.Status().Update(ctx, &backup); err != nil {
 		return reconcile.Result{}, err
 	}
-	return reconcile.Result{}, reconcileErr
+	return reconcile.Result{}, returnErr
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, backup Backup) (state, reason string, returnedErr error) {
+func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, error) {
+	logger := log.FromContext(ctx)
 	var source, destination pool.Pool
 	if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Source.Name}, &source); err != nil {
-		return "", "", errors.WithMessage(err, "get source Pool")
+		return "", errors.WithMessage(err, "get source Pool")
 	}
 	if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Destination.Name}, &destination); err != nil {
-		return "", "", errors.WithMessage(err, "get destination Pool")
+		return "", errors.WithMessage(err, "get destination Pool")
 	}
 
-	if source.Status == nil || source.Status.State != pool.Online {
-		return "NotReady", fmt.Sprintf("source pool %q is unhealthy", source.Name), nil
+	if err := validatePoolIsHealthy("source", source); err != nil {
+		return NotReady, err
 	}
-	if destination.Status == nil || destination.Status.State != pool.Online {
-		return "NotReady", fmt.Sprintf("destination pool %q is unhealthy", destination.Name), nil
+	if source.Spec == nil || source.Spec.Snapshots == nil {
+		return NotReady, errors.Errorf("source pool %q must define .spec.snapshots, either empty (the default schedule) or custom intervals", source.Name)
 	}
-	return "Ready", "", nil
+	if err := validatePoolIsHealthy("destination", destination); err != nil {
+		return NotReady, err
+	}
+
+	var completedSnapshots pool.PoolSnapshotList
+	err := r.client.List(ctx, &completedSnapshots, &client.ListOptions{
+		FieldSelector: fields.AndSelectors(
+			fields.OneTermEqualSelector(".spec.pool.name", source.Name),
+			fields.OneTermEqualSelector(".status.state", string(pool.SnapshotCompleted)),
+		),
+		Namespace: backup.Namespace,
+	})
+	if err != nil {
+		return "", err
+	}
+	if err := pool.SortScheduledSnapshots(completedSnapshots.Items); err != nil {
+		return "", err
+	}
+	sendSnapshots := completedSnapshots.Items
+	logger.Info("Found backup-ready snapshots", "snapshots", len(sendSnapshots))
+	if backup.Status != nil && backup.Status.LastSentSnapshot != nil {
+		lastSentSnapshotIndex := slices.IndexFunc(sendSnapshots, func(snapshot *pool.PoolSnapshot) bool {
+			return snapshot.Name == backup.Status.LastSentSnapshot.Name
+		})
+		if lastSentSnapshotIndex != -1 {
+			sendSnapshots = sendSnapshots[lastSentSnapshotIndex+1:]
+			logger.Info("Found last sent snapshot, using incremental send", "last", backup.Status.LastSentSnapshot.Name, "snapshots", len(sendSnapshots))
+		}
+	}
+	if len(sendSnapshots) == 0 {
+		logger.Info("All snapshots have already been sent, done!")
+		return Ready, nil
+	}
+	sendLastSnapshot := sendSnapshots[len(sendSnapshots)-1]
+	logger.Info("Sending", "snapshot", sendLastSnapshot.Name)
+
+	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
+		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
+			return r.sendPoolSnapshot(ctx, backup, destination, sourceConn, destinationConn, sendLastSnapshot)
+		})
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return Ready, nil
 }
 
-func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Backup, error) {
+func (r *Reconciler) matchingBackups(ctx context.Context, poolName, poolNamespace string) ([]Backup, error) {
 	var allBackups []Backup
 	{
 		// Fetch all backups with this pool as their source.
 		var sourceBackups BackupList
 		err := r.client.List(ctx, &sourceBackups, &client.ListOptions{
-			FieldSelector: fields.OneTermEqualSelector(sourceProperty, pool.Name),
-			Namespace:     pool.Namespace,
+			FieldSelector: fields.OneTermEqualSelector(sourceProperty, poolName),
+			Namespace:     poolNamespace,
 		})
 		if err != nil {
 			return nil, errors.WithMessage(err, "Failed to list matching source backups")
@@ -152,15 +247,117 @@ func (r *Reconciler) matchingBackups(ctx context.Context, pool *pool.Pool) ([]Ba
 	{
 		// Fetch all backups with this pool as their destination.
 		// There may be duplicates, but this shouldn't matter once they're deduplicated by the event handler.
-		var remainingDestinationBackups BackupList
-		err := r.client.List(ctx, &remainingDestinationBackups, &client.ListOptions{
-			FieldSelector: fields.OneTermEqualSelector(destinationProperty, pool.Name),
-			Namespace:     pool.Namespace,
+		var destinationBackups BackupList
+		err := r.client.List(ctx, &destinationBackups, &client.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector(destinationProperty, poolName),
+			Namespace:     poolNamespace,
 		})
 		if err != nil {
-			return nil, errors.WithMessage(err, "Failed to list any remaining destination backups")
+			return nil, errors.WithMessage(err, "Failed to list matching destination backups")
 		}
-		allBackups = append(allBackups, remainingDestinationBackups.Items...)
+		allBackups = append(allBackups, destinationBackups.Items...)
 	}
 	return allBackups, nil
+}
+
+func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
+	if snapshot.Status == nil || snapshot.Status.DatasetNames == nil {
+		return errors.Errorf("snapshot %q status does not contain snapshotted dataset names to send: %+v", snapshot.Name, snapshot.Status)
+	}
+	for _, datasetName := range *snapshot.Status.DatasetNames {
+		err := r.sendDatasetSnapshot(ctx, backup, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
+		if err != nil {
+			return err
+		}
+	}
+	backup.Status.LastSentSnapshot = &corev1.LocalObjectReference{Name: snapshot.Name}
+	return r.client.Status().Update(ctx, backup)
+}
+
+func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sendArgs := []string{
+		"/usr/sbin/zfs", "send",
+		"--raw",       // Always send raw streams. Must be enabled to avoid decrypting and sending data in the clear.
+		"--replicate", // Copies all data contained in the snapshot - properties, snapshots, descendent file systems, and clones are preserved.
+	}
+	if backup.Status.LastSentSnapshot != nil { // Use incremental send after first send
+		sendArgs = append(sendArgs, "-I", "@"+backup.Status.LastSentSnapshot.Name)
+	}
+	fullSnapshotName := fmt.Sprintf("%s@%s", datasetName, snapshotName)
+	sendArgs = append(sendArgs, fullSnapshotName)
+
+	const maxExpectedErrors = 2
+	errs := make(chan error, maxExpectedErrors)
+	reader, writer := io.Pipe()
+	countWriter := wrapAsCountWriter(writer)
+	go func() {
+		errs <- sourceConn.ExecWriteStdout(ctx, countWriter, "/usr/bin/sudo", sendArgs...)
+	}()
+	go func() {
+		receiveErr := destinationConn.ExecReadStdin(ctx, reader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
+			"-d", // Preserve hierarchy when using recursive replicated streams
+			destinationPool.Spec.Name,
+		)
+		errs <- ignoreReceiveSnapshotExists(datasetName, receiveErr)
+	}()
+	go func() {
+		const statusUpdateInterval = 30 * time.Second
+		lastCount := countWriter.Count()
+		ticker := time.NewTicker(statusUpdateInterval)
+		for {
+			select {
+			case <-ticker.C:
+				backup.Status.State = Sending
+				newCount := countWriter.Count()
+				sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
+				rate := (newCount - lastCount) / int64(statusUpdateInterval/time.Second)
+				rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
+				backup.Status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
+				if err := r.client.Status().Update(ctx, backup); err != nil {
+					errs <- err
+				}
+				lastCount = newCount
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	for range maxExpectedErrors {
+		select {
+		case err := <-errs:
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func validatePoolIsHealthy(contextualName string, p pool.Pool) (returnedErr error) {
+	defer func() {
+		returnedErr = errors.WithMessagef(returnedErr, "%s pool %q is unhealthy", contextualName, p.Name)
+	}()
+	switch {
+	case p.Status != nil && p.Status.State == pool.Online:
+		return nil
+	case p.Status == nil:
+		return errors.New("no status available")
+	case p.Status.Reason == "":
+		return errors.New(string(p.Status.State))
+	default:
+		return errors.Errorf("%s: %s", p.Status.State, p.Status.Reason)
+	}
+}
+
+func ignoreReceiveSnapshotExists(datasetName string, err error) error {
+	var execErr *pool.ExecError
+	if errors.As(err, &execErr) && bytes.Contains(execErr.Output, fmt.Appendf(nil, "cannot receive new filesystem stream: destination '%s' exists...", datasetName)) {
+		return nil
+	}
+	return err
 }
