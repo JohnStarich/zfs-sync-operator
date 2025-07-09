@@ -443,7 +443,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "hourly-",
+						Name:            "hourly-1",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -476,7 +476,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "hourly-",
+						Name:            "hourly-1",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 1*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -492,7 +492,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "daily-",
+						Name:            "daily-2",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(24*time.Hour, 24*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "daily"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -508,7 +508,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "weekly-",
+						Name:            "weekly-3",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(7*24*time.Hour, 7*24*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "weekly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -524,7 +524,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "monthly-",
+						Name:            "monthly-4",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(365*24*time.Hour/12, 365*24*time.Hour/12).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "monthly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -540,7 +540,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "yearly-",
+						Name:            "yearly-5",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(365*24*time.Hour, 365*24*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "yearly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -561,9 +561,9 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			existing: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -defaultExistingSnapshotsDelta).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						Name:        "hourly-1",
+						Annotations: map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -defaultExistingSnapshotsDelta).Format(time.RFC3339)},
+						Labels:      map[string]string{nameLabel: "hourly"},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -595,7 +595,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "hourly-",
+						Name:            "hourly-1",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -defaultExistingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -616,9 +616,9 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			existing: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -2*defaultExistingSnapshotsDelta).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						Name:        "hourly-1",
+						Annotations: map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -2*defaultExistingSnapshotsDelta).Format(time.RFC3339)},
+						Labels:      map[string]string{nameLabel: "hourly"},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -650,7 +650,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "hourly-",
+						Name:            "hourly-1",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(defaultExistingSnapshotsDelta, -2*defaultExistingSnapshotsDelta).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -670,7 +670,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "hourly-",
+						Name:            "hourly-2",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 0).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -696,9 +696,9 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			existing: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName: "hourly-",
-						Annotations:  map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, -24*time.Hour).Format(time.RFC3339)},
-						Labels:       map[string]string{nameLabel: "hourly"},
+						Name:        "hourly-1",
+						Annotations: map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, -24*time.Hour).Format(time.RFC3339)},
+						Labels:      map[string]string{nameLabel: "hourly"},
 					},
 					Spec: zfspool.SnapshotSpec{
 						Pool:     corev1.LocalObjectReference{Name: somePoolName},
@@ -728,7 +728,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 			expectSnapshots: []*zfspool.PoolSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "hourly-",
+						Name:            "hourly-1",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, -24*time.Hour).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},
@@ -748,7 +748,7 @@ func TestPoolCreatesSnapshots(t *testing.T) {
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						GenerateName:    "hourly-",
+						Name:            "hourly-2",
 						Annotations:     map[string]string{timestampAnnotation: testClock.RoundedRelativeTime(1*time.Hour, 0).Format(time.RFC3339)},
 						Labels:          map[string]string{nameLabel: "hourly"},
 						OwnerReferences: []metav1.OwnerReference{makePoolOwnerReference()},

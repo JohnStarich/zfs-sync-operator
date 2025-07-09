@@ -265,7 +265,7 @@ func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, desti
 		return errors.Errorf("snapshot %q status does not contain snapshotted dataset names to send: %+v", snapshot.Name, snapshot.Status)
 	}
 	for _, datasetName := range *snapshot.Status.DatasetNames {
-		err := r.sendDatasetSnapshot(ctx, backup, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name) // TODO guarantee actually unique ID (UID), not just uniquely generated snapshot's name
+		err := r.sendDatasetSnapshot(ctx, backup, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
 		if err != nil {
 			return err
 		}

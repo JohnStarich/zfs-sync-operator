@@ -14,6 +14,7 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
+	"github.com/johnstarich/zfs-sync-operator/internal/idgen"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,6 +100,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 		idempotentMetrics:  true,
 		maxSessionWait:     8 * time.Second,
 		onlyWatchNamespace: namespace,
+		uuidGenerator:      idgen.NewDeterministicTest(tb),
 	})
 	if err != nil {
 		tb.Fatal(err)

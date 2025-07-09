@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/clock"
+	"github.com/johnstarich/zfs-sync-operator/internal/idgen"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -36,15 +37,17 @@ type Reconciler struct {
 	client         client.Client
 	clock          clock.Clock
 	maxSessionWait time.Duration
+	uuidGenerator  idgen.IDGenerator
 }
 
 // RegisterReconciler registers a Pool reconciler with manager
-func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSessionWait time.Duration, clock clock.Clock) error {
+func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSessionWait time.Duration, clock clock.Clock, uuidGenerator idgen.IDGenerator) error {
 	ctrl, err := controller.New("pool", manager, controller.Options{
 		Reconciler: &Reconciler{
 			client:         manager.GetClient(),
-			maxSessionWait: maxSessionWait,
 			clock:          clock,
+			maxSessionWait: maxSessionWait,
+			uuidGenerator:  uuidGenerator,
 		},
 	})
 	if err != nil {
@@ -169,10 +172,10 @@ func (r *Reconciler) reconcileSnapshotInterval(ctx context.Context, now time.Tim
 			deadline := nextTime.Add(interval.Interval.Duration)
 			snapshot := PoolSnapshot{
 				ObjectMeta: metav1.ObjectMeta{
-					GenerateName: interval.Name + "-",
-					Namespace:    pool.Namespace,
-					Labels:       map[string]string{snapshotIntervalLabel: interval.Name},
-					Annotations:  map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
+					Name:        fmt.Sprintf("%s-%s", interval.Name, r.uuidGenerator.MustNewID()),
+					Namespace:   pool.Namespace,
+					Labels:      map[string]string{snapshotIntervalLabel: interval.Name},
+					Annotations: map[string]string{snapshotTimestampAnnotation: nextTime.Format(time.RFC3339)},
 				},
 				Spec: SnapshotSpec{
 					Pool:                 corev1.LocalObjectReference{Name: pool.Name},

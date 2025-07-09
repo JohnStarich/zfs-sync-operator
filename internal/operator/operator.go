@@ -13,6 +13,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/backup"
 	"github.com/johnstarich/zfs-sync-operator/internal/clock"
+	"github.com/johnstarich/zfs-sync-operator/internal/idgen"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
@@ -77,10 +78,11 @@ type Config struct {
 	LogHandler         slog.Handler
 	MetricsPort        string
 	Namespace          string
-	clock              clock.Clock   // in tests only, control time for more consistent, assertable results
-	idempotentMetrics  bool          // disables safety checks for double metrics registrations
-	maxSessionWait     time.Duration // allows tests to shorten wait times for faster pass/fail results
-	onlyWatchNamespace string        // in tests only, restrict watches to this namespace
+	clock              clock.Clock       // in tests only, control time for more consistent, assertable results
+	idempotentMetrics  bool              // disables safety checks for double metrics registrations
+	maxSessionWait     time.Duration     // allows tests to shorten wait times for faster pass/fail results
+	onlyWatchNamespace string            // in tests only, restrict watches to this namespace
+	uuidGenerator      idgen.IDGenerator // in tests only, produce deterministic unique identifiers
 }
 
 // New returns a new [Operator]
@@ -95,6 +97,9 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	}
 	if c.clock == nil {
 		c.clock = &clock.Real{}
+	}
+	if c.uuidGenerator == nil {
+		c.uuidGenerator = idgen.New()
 	}
 
 	cacheOptions := cache.Options{}
@@ -126,7 +131,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err := backup.RegisterReconciler(ctx, mgr); err != nil {
 		return nil, err
 	}
-	if err := pool.RegisterReconciler(ctx, mgr, c.maxSessionWait, c.clock); err != nil {
+	if err := pool.RegisterReconciler(ctx, mgr, c.maxSessionWait, c.clock, c.uuidGenerator); err != nil {
 		return nil, err
 	}
 
