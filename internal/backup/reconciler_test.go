@@ -69,7 +69,6 @@ func TestBackupReady(t *testing.T) {
 				Reason: `source pool "source" must define .spec.snapshots, either empty (the default schedule) or custom intervals`,
 			},
 		},
-		// TODO require source and destination be different
 	} {
 		t.Run(tc.description, func(t *testing.T) {
 			t.Parallel()
