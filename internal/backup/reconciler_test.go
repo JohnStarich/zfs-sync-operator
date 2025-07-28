@@ -440,7 +440,7 @@ func BenchmarkSendSpeed(b *testing.B) {
 			tc.source.SSHExecPrefixResults = map[string]*ssh.TestExecResult{
 				`/usr/sbin/zpool status `:               {Stdout: []byte(`state: ONLINE`)},
 				`/usr/bin/sudo /usr/sbin/zfs snapshot `: {ExitCode: 0},
-				`/usr/bin/sudo /usr/sbin/zfs send `:     {StdoutReader: io.LimitReader(zeroReader{}, bytes)}, // TODO randomize data to ensure compression isn't helping?
+				`/usr/bin/sudo /usr/sbin/zfs send `:     {StdoutReader: io.LimitReader(zeroReader{}, bytes)},
 			}
 			source := makePool(b, "source", run, tc.source)
 			const someDataset = "source/some-dataset-1"
