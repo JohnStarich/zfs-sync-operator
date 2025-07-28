@@ -84,12 +84,7 @@ func Start(ctx context.Context, config Config) (*netstack.Net, error) {
 	go func() {
 		const statsLogInterval = 30 * time.Second
 		for {
-			stats, err := encodableStats(dialer.Stats())
-			if err == nil {
-				logger.Info("WireGuard netstack stats", "stats", stats)
-			} else {
-				logger.Error("Failed to encode WireGuard netstack stats", "error", err)
-			}
+			logger.Info("WireGuard netstack stats", "stats", encodableStats(dialer.Stats()))
 			select {
 			case <-time.After(statsLogInterval):
 			case <-ctx.Done():

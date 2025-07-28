@@ -6,8 +6,8 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip"
 )
 
-func encodableStats(stats tcpip.Stats) (any, error) {
-	return encodableStatCounters(reflect.ValueOf(stats)), nil
+func encodableStats(stats tcpip.Stats) any {
+	return encodableStatCounters(reflect.ValueOf(stats))
 }
 
 func encodableStatCounters(value reflect.Value) any {

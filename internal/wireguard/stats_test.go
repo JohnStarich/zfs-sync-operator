@@ -14,8 +14,7 @@ func TestEncodableStats(t *testing.T) {
 	stats := tcpip.Stats{}.FillIn()
 	stats.TCP.Timeouts.Increment()
 
-	encodable, err := encodableStats(stats)
-	require.NoError(t, err)
+	encodable := encodableStats(stats)
 	encoded, err := json.Marshal(encodable)
 	require.NoError(t, err)
 	encodedStr := string(encoded)
