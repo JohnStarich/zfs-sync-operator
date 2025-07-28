@@ -504,6 +504,9 @@ func BenchmarkSendSpeed(b *testing.B) {
 							b.ResetTimer()
 						}
 						startedSending = true
+					case // no action
+						zfsbackup.Error,
+						zfsbackup.NotReady:
 					}
 				}
 			}

@@ -220,7 +220,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, erro
 
 	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
 		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
-			return r.sendPoolSnapshot(ctx, backup, source, destination, sourceConn, destinationConn, sendLastSnapshot)
+			return r.sendPoolSnapshot(ctx, backup, destination, sourceConn, destinationConn, sendLastSnapshot)
 		})
 	})
 	if err != nil {
@@ -261,12 +261,12 @@ func (r *Reconciler) matchingBackups(ctx context.Context, poolName, poolNamespac
 	return allBackups, nil
 }
 
-func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
+func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
 	if snapshot.Status == nil || snapshot.Status.DatasetNames == nil {
 		return errors.Errorf("snapshot %q status does not contain snapshotted dataset names to send: %+v", snapshot.Name, snapshot.Status)
 	}
 	for _, datasetName := range *snapshot.Status.DatasetNames {
-		err := r.sendDatasetSnapshot(ctx, backup, sourcePool, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
+		err := r.sendDatasetSnapshot(ctx, backup, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
 		if err != nil {
 			return err
 		}
@@ -275,7 +275,7 @@ func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, sourc
 	return r.client.Status().Update(ctx, backup)
 }
 
-func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
+func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
 	logger := log.FromContext(ctx)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

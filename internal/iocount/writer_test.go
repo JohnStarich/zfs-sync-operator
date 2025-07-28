@@ -59,7 +59,8 @@ func TestWriterWriteConcurrently(t *testing.T) {
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			fmt.Fprintf(countWriter, formatString, index)
+			_, err := fmt.Fprintf(countWriter, formatString, index)
+			assert.NoError(t, err)
 		}()
 	}
 	waitGroup.Wait()

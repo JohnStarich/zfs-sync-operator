@@ -11,7 +11,7 @@ func encodableStats(stats tcpip.Stats) any {
 }
 
 func encodableStatCounters(value reflect.Value) any {
-	switch value.Kind() {
+	switch value.Kind() { //nolint:exhaustive // We only care to handle pointers and structs, do not need to handle any arbitrary kind
 	case reflect.Pointer:
 		elem := value.Elem()
 		if elem.Kind() == reflect.Struct && value.CanInterface() {

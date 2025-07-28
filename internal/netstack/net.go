@@ -24,11 +24,12 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 )
 
+// Net is a userland network stack
 type Net struct {
 	channelEndpoint     *channel.Endpoint
 	events              chan tun.Event
 	incomingPacket      chan *stack.PacketBuffer
-	maxTransmissionUnit int
+	maxTransmissionUnit uint32
 	notifyHandle        *channel.NotificationHandle
 	stack               *stack.Stack
 }
@@ -37,7 +38,10 @@ var _ tun.Device = &Net{}
 
 const nicID = 1
 
-func New(localAddresses []netip.Addr, maxTransmissionUnit int) (*Net, error) {
+// New returns a new userland network stack.
+//
+// Useful for avoiding kernel module privilege requirements to manage TUN devices, like with WireGuard.
+func New(localAddresses []netip.Addr, maxTransmissionUnit uint32) (*Net, error) {
 	opts := stack.Options{
 		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol},
@@ -45,7 +49,7 @@ func New(localAddresses []netip.Addr, maxTransmissionUnit int) (*Net, error) {
 	}
 	const channelEndpointSize = 1 << 10
 	net := &Net{
-		channelEndpoint:     channel.New(channelEndpointSize, uint32(maxTransmissionUnit), ""),
+		channelEndpoint:     channel.New(channelEndpointSize, maxTransmissionUnit, ""),
 		stack:               stack.New(opts),
 		events:              make(chan tun.Event, 10),
 		incomingPacket:      make(chan *stack.PacketBuffer),
@@ -90,11 +94,20 @@ func New(localAddresses []netip.Addr, maxTransmissionUnit int) (*Net, error) {
 	return net, nil
 }
 
-func (n *Net) BatchSize() int           { return 1 }
+// BatchSize implements [tun.Device]
+func (n *Net) BatchSize() int { return 1 }
+
+// Events implements [tun.Device]
 func (n *Net) Events() <-chan tun.Event { return n.events }
-func (n *Net) File() *os.File           { return nil }
-func (n *Net) MTU() (int, error)        { return n.maxTransmissionUnit, nil }
-func (n *Net) Name() (string, error)    { return "go", nil }
+
+// File implements [tun.Device]
+func (n *Net) File() *os.File { return nil }
+
+// MTU implements [tun.Device]
+func (n *Net) MTU() (int, error) { return int(n.maxTransmissionUnit), nil }
+
+// Name implements [tun.Device]
+func (n *Net) Name() (string, error) { return "go", nil }
 
 func (n *Net) Read(buffers [][]byte, sizes []int, offset int) (int, error) {
 	packet, ok := <-n.incomingPacket
@@ -140,6 +153,8 @@ func (n *Net) write(packet []byte) error {
 	}
 }
 
+// WriteNotify receives notifications from its attached NIC when packets are ready to read from the endpoint.
+// Attached network devices, like WireGuard read these as local inbound traffic to then be sent over the VPN.
 func (n *Net) WriteNotify() {
 	pkt := n.channelEndpoint.Read()
 	if pkt == nil {
@@ -148,6 +163,7 @@ func (n *Net) WriteNotify() {
 	n.incomingPacket <- pkt
 }
 
+// Close cleans up and stops the network stack
 func (n *Net) Close() error {
 	n.stack.RemoveNIC(nicID)
 	n.stack.Close()
@@ -158,6 +174,7 @@ func (n *Net) Close() error {
 	return nil
 }
 
+// Stats returns the network stack's statistics
 func (n *Net) Stats() tcpip.Stats { return n.stack.Stats() }
 
 func asFullAddressAndProto(endpoint netip.AddrPort) (tcpip.FullAddress, tcpip.NetworkProtocolNumber) {
@@ -172,12 +189,17 @@ func asFullAddressAndProto(endpoint netip.AddrPort) (tcpip.FullAddress, tcpip.Ne
 	}, protoNumber
 }
 
+// ListenTCPAddrPort returns a listener for connections on the given address and port
 func (n *Net) ListenTCPAddrPort(addr netip.AddrPort) (*gonet.TCPListener, error) {
 	fullAddress, protocolNumber := asFullAddressAndProto(addr)
 	return gonet.ListenTCP(n.stack, fullAddress, protocolNumber)
 }
 
+// DialContext implements the same interface as net.Dialer to dial TCP connections
 func (n *Net) DialContext(ctx context.Context, network, address string) (pkgnet.Conn, error) {
+	if network != "tcp" {
+		return nil, errors.New("only 'tcp' is supported")
+	}
 	addrPort, err := netip.ParseAddrPort(address)
 	if err != nil {
 		return nil, &pkgnet.OpError{Op: "dial", Err: err}
