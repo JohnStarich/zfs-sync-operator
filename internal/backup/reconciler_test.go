@@ -484,33 +484,42 @@ func BenchmarkSendSpeed(b *testing.B) {
 			}
 			require.NoError(b, TestEnv.Client().Create(TestEnv.Context(), &backup))
 
-			watcher, err := TestEnv.Client().Watch(TestEnv.Context(), &zfsbackup.BackupList{}, &client.ListOptions{
-				Namespace: run.Namespace,
-			})
-			require.NoError(b, err)
 			startedSending := false
-			for event := range watcher.ResultChan() {
-				backup, ok := event.Object.(*zfsbackup.Backup)
-				if ok && backup.Status != nil {
-					b.Log("Backup state:", backup.Status.State, backup.Status.Reason)
-					switch backup.Status.State {
-					case zfsbackup.Ready:
-						if startedSending && backup.Status.LastSentSnapshot != nil && backup.Status.LastSentSnapshot.Name == sourceSnapshot.Name {
-							b.StopTimer()
-							watcher.Stop()
-						}
-					case zfsbackup.Sending:
-						if !startedSending {
-							b.ResetTimer()
-						}
-						startedSending = true
-					case // no action
-						zfsbackup.Error,
-						zfsbackup.NotReady:
+			watchBackupStatusUpdates(b, run.Namespace, func(status zfsbackup.Status) bool {
+				b.Log("Backup state:", status.State, status.Reason)
+				switch status.State {
+				case zfsbackup.Ready:
+					if startedSending && status.LastSentSnapshot != nil && status.LastSentSnapshot.Name == sourceSnapshot.Name {
+						b.StopTimer()
+						return false
 					}
+				case zfsbackup.Sending:
+					if !startedSending {
+						b.ResetTimer()
+					}
+					startedSending = true
+				case // no action
+					zfsbackup.Error,
+					zfsbackup.NotReady:
 				}
-			}
+				return true
+			})
 			assert.True(b, receiveCalled, "ZFS receive should be called for sent snapshots")
 		})
+	}
+}
+
+func watchBackupStatusUpdates(tb testing.TB, namespace string, handleStatus func(zfsbackup.Status) bool) {
+	watcher, err := TestEnv.Client().Watch(TestEnv.Context(), &zfsbackup.BackupList{}, &client.ListOptions{
+		Namespace: namespace,
+	})
+	require.NoError(tb, err)
+	for event := range watcher.ResultChan() {
+		backup, ok := event.Object.(*zfsbackup.Backup)
+		if ok && backup.Status != nil {
+			if !handleStatus(*backup.Status) {
+				watcher.Stop()
+			}
+		}
 	}
 }
