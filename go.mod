@@ -8,11 +8,12 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/go-logr/logr v1.4.2
 	github.com/gofrs/flock v0.12.1
+	github.com/johnstarich/go/datasize v0.0.1
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/crypto v0.38.0
-	golang.zx2c4.com/wireguard v0.0.0-20250505131008-436f7fdc1670
+	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	k8s.io/api v0.32.1
 	k8s.io/apiextensions-apiserver v0.32.1
@@ -20,7 +21,6 @@ require (
 	k8s.io/client-go v0.32.1
 	sigs.k8s.io/controller-runtime v0.20.4
 	sigs.k8s.io/yaml v1.4.0
-	github.com/johnstarich/go/datasize v0.0.1
 )
 
 require (

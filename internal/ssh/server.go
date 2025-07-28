@@ -2,6 +2,7 @@
 package ssh
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -33,12 +34,14 @@ type TestConfig struct {
 
 // TestExecResult describes the behavior of a command executed via SSH
 type TestExecResult struct {
-	ExpectStdin []byte
-	Stdout      []byte
-	Stderr      []byte
-	ExitCode    int
-	WaitContext context.Context // WaitContext waits until Done()'s channel is closed before returning. Great for tests on timing behavior.
-	Called      *bool           // Called, when not nil, is set to true when the result is used.
+	Called       *bool // Called, when not nil, is set to true when the result is used.
+	ExitCode     int
+	ExpectStdin  []byte // implies ReadStdin
+	ReadStdin    bool
+	Stderr       []byte
+	Stdout       []byte
+	StdoutReader io.Reader       // Data printed from command's stdout. Preferred over Stdout.
+	WaitContext  context.Context // WaitContext waits until Done()'s channel is closed before returning. Great for tests on timing behavior.
 }
 
 // TestServer starts an SSH server and returns the user and private key to use
@@ -214,11 +217,18 @@ func handleExecRequest(ctx context.Context, tb testing.TB, command string, stdin
 	}
 	if len(result.ExpectStdin) > 0 {
 		stdinBytes, err := io.ReadAll(stdin)
-		require.NoError(tb, ignoreShutdownErrors(err))
+		require.NoError(tb, err)
 		assert.EqualValues(tb, result.ExpectStdin, stdinBytes)
+	} else if result.ReadStdin {
+		_, err := io.Copy(io.Discard, stdin)
+		require.NoError(tb, err)
 	}
-	_, err := stdout.Write(result.Stdout)
-	require.NoError(tb, err)
+	stdoutReader := result.StdoutReader
+	if stdoutReader == nil {
+		stdoutReader = bytes.NewReader(result.Stdout)
+	}
+	_, err := io.Copy(stdout, stdoutReader)
+	require.NoError(tb, ignoreShutdownErrors(err))
 	_, err = stderr.Write(result.Stderr)
 	require.NoError(tb, err)
 	if result.WaitContext != nil {

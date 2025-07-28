@@ -75,7 +75,6 @@ type SSHSpec struct {
 
 // WireGuardSpec defines the WireGuard connection details for a [Pool]
 type WireGuardSpec struct {
-	DNSAddresses    []netip.Addr              `json:"dnsAddresses,omitempty"`
 	LocalAddress    netip.Addr                `json:"localAddress"`
 	LocalPrivateKey corev1.SecretKeySelector  `json:"localPrivateKey"`
 	PeerAddress     string                    `json:"peerAddress"`
