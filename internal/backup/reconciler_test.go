@@ -1,7 +1,6 @@
 package backup_test
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/netip"
@@ -436,9 +435,6 @@ func TestBackupResumeSendAndReceive(t *testing.T) {
 	}, maxWait, tick)
 	const someReceiveResumeToken = "some-receive-resume-token"
 	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send -t %s`, someReceiveResumeToken)] = &ssh.TestExecResult{Stdout: []byte(`some data`)}
-	timeoutCtx, cancel := context.WithTimeout(TestEnv.Context(), 1*time.Second)
-	t.Cleanup(cancel)
-	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate %s\@%s`, someSourceDataset, sourceSnapshot.Name)] = &ssh.TestExecResult{Stdout: []byte(`some data`) /* send the same data to avoid tripping the stdin assertion on receive */, ExitCode: 1, WaitContext: timeoutCtx}
 
 	// Create backup and patch status as "in progress"
 	const someBackup = "mybackup"
