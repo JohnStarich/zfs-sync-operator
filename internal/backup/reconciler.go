@@ -347,15 +347,15 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 		for {
 			status := Status{
 				State: Sending,
-				InProgressSnapshot: &corev1.LocalObjectReference{
-					Name: snapshotName,
-				},
 			}
 			newCount := countWriter.Count()
 			sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
 			rate := (newCount - lastCount) / int64(statusUpdateInterval/time.Second)
 			rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
 			status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
+			if newCount > 0 {
+				status.InProgressSnapshot = &corev1.LocalObjectReference{Name: snapshotName}
+			}
 
 			lastCount = newCount
 			if err := r.patchStatus(ctx, backup.Namespace, backup.Name, status); err != nil {
