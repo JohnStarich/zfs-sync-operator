@@ -37,6 +37,11 @@ spec:
                 type: string
               reason:
                 type: string
+              inProgressSnapshot:
+                type: object
+                properties:
+                  name:
+                    type: string
               lastSentSnapshot:
                 type: object
                 properties:

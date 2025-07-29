@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/johnstarich/go/datasize"
@@ -220,7 +221,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, erro
 
 	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
 		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
-			return r.sendPoolSnapshot(ctx, backup, destination, sourceConn, destinationConn, sendLastSnapshot)
+			return r.sendPoolSnapshot(ctx, backup, source, destination, sourceConn, destinationConn, sendLastSnapshot)
 		})
 	})
 	if err != nil {
@@ -261,48 +262,83 @@ func (r *Reconciler) matchingBackups(ctx context.Context, poolName, poolNamespac
 	return allBackups, nil
 }
 
-func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
+func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, snapshot *pool.PoolSnapshot) error {
 	if snapshot.Status == nil || snapshot.Status.DatasetNames == nil {
 		return errors.Errorf("snapshot %q status does not contain snapshotted dataset names to send: %+v", snapshot.Name, snapshot.Status)
 	}
 	for _, datasetName := range *snapshot.Status.DatasetNames {
-		err := r.sendDatasetSnapshot(ctx, backup, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
+		err := r.sendDatasetSnapshot(ctx, backup, sourcePool, destinationPool, sourceConn, destinationConn, datasetName, snapshot.Name)
 		if err != nil {
 			return err
 		}
 	}
+	backup.Status.InProgressSnapshot = nil
 	backup.Status.LastSentSnapshot = &corev1.LocalObjectReference{Name: snapshot.Name}
 	return r.client.Status().Update(ctx, backup)
 }
 
-func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, datasetName, snapshotName string) error {
+func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, sourceDatasetName, snapshotName string) error {
 	logger := log.FromContext(ctx)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	sendArgs := []string{
-		"/usr/sbin/zfs", "send",
-		"--raw",       // Always send raw streams. Must be enabled to avoid decrypting and sending data in the clear.
-		"--replicate", // Copies all data contained in the snapshot - properties, snapshots, descendent file systems, and clones are preserved.
+	const datasetSeparator = "/"
+	sourcePrefix := sourcePool.Spec.Name + datasetSeparator
+	if !strings.HasPrefix(sourceDatasetName, sourcePrefix) {
+		return errors.Errorf("unexpected dataset name %q must begin with source pool's name %q", sourceDatasetName, sourcePrefix)
 	}
-	if backup.Status.LastSentSnapshot != nil { // Use incremental send after first send
-		sendArgs = append(sendArgs, "-I", "@"+backup.Status.LastSentSnapshot.Name)
+	destinationDatasetName := destinationPool.Spec.Name + datasetSeparator + strings.TrimPrefix(sourceDatasetName, sourcePrefix)
+
+	sendArgs := []string{"/usr/bin/sudo", "/usr/sbin/zfs", "send"}
+	var receiveResumeToken *string
+	if backup.Status.InProgressSnapshot != nil && backup.Status.InProgressSnapshot.Name == snapshotName {
+		const zfsGetUnsetValue = "-"
+		tokenBytes, err := destinationConn.ExecCombinedOutput(ctx, "/usr/sbin/zfs", "get",
+			"-H",          // Skip table headers
+			"-o", "value", // Only return the token's value
+			"receive_resume_token", // Only return the token
+			destinationDatasetName,
+		)
+		if err != nil {
+			logger.Error(err, "Failed to retrieve receive_resume_token, sending from scratch...")
+		} else if token := string(tokenBytes); token != zfsGetUnsetValue {
+			receiveResumeToken = &token
+		} else {
+			logger.Info("No receive_resume_token available for in progress send, sending from scratch...")
+		}
 	}
-	fullSnapshotName := fmt.Sprintf("%s@%s", datasetName, snapshotName)
-	sendArgs = append(sendArgs, fullSnapshotName)
+
+	fullSnapshotName := fmt.Sprintf("%s@%s", sourceDatasetName, snapshotName)
+	if receiveResumeToken == nil { // If we're not resuming an interrupted send, create a normal send stream with all options
+		sendArgs = append(sendArgs,
+			"--raw",       // Always send raw streams. Must be enabled to avoid decrypting and sending data in the clear.
+			"--replicate", // Copies all data contained in the snapshot - properties, snapshots, descendent file systems, and clones are preserved.
+		)
+		if backup.Status.LastSentSnapshot != nil { // Use incremental send after first send
+			sendArgs = append(sendArgs, "-I", "@"+backup.Status.LastSentSnapshot.Name)
+		}
+		sendArgs = append(sendArgs, fullSnapshotName)
+	} else {
+		sendArgs = append(sendArgs, "-t", *receiveResumeToken) // Attempt to resume an interrupted send via a "receive_resume_token"
+	}
+
+	receiveArgs := []string{
+		"/usr/bin/sudo", "/usr/sbin/zfs", "receive",
+		"-d", // Preserve hierarchy when using recursive replicated streams
+		"-s", // Enable send to resume later if interrupted
+		destinationPool.Spec.Name,
+	}
+	logger.Info("Syncing", "sendCommand", sendArgs, "receiveCommand", receiveArgs)
 
 	const maxExpectedErrors = 2
 	errs := make(chan error, maxExpectedErrors)
 	pipeReader, pipeWriter := io.Pipe()
 	countWriter := iocount.NewWriter(pipeWriter)
 	go func() {
-		errs <- sourceConn.ExecWriteStdout(ctx, countWriter, "/usr/bin/sudo", sendArgs...)
+		errs <- sourceConn.ExecWriteStdout(ctx, countWriter, sendArgs[0], sendArgs[1:]...)
 	}()
 	go func() {
-		errs <- destinationConn.ExecReadStdin(ctx, pipeReader, "/usr/bin/sudo", "/usr/sbin/zfs", "receive",
-			"-d", // Preserve hierarchy when using recursive replicated streams
-			destinationPool.Spec.Name,
-		)
+		errs <- destinationConn.ExecReadStdin(ctx, pipeReader, receiveArgs[0], receiveArgs[1:]...)
 	}()
 	go func() {
 		const statusUpdateInterval = 30 * time.Second
@@ -317,6 +353,9 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, de
 			rate := (newCount - lastCount) / int64(statusUpdateInterval/time.Second)
 			rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
 			status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
+			if newCount > 0 {
+				status.InProgressSnapshot = &corev1.LocalObjectReference{Name: snapshotName}
+			}
 
 			lastCount = newCount
 			if err := r.patchStatus(ctx, backup.Namespace, backup.Name, status); err != nil {

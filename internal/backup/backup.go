@@ -46,9 +46,10 @@ type Spec struct {
 
 // Status holds status information for a [Backup]
 type Status struct {
-	State            State                        `json:"state"`
-	Reason           string                       `json:"reason"`
-	LastSentSnapshot *corev1.LocalObjectReference `json:"lastSentSnapshot,omitempty"`
+	State              State                        `json:"state"`
+	Reason             string                       `json:"reason"`
+	InProgressSnapshot *corev1.LocalObjectReference `json:"inProgressSnapshot,omitempty"`
+	LastSentSnapshot   *corev1.LocalObjectReference `json:"lastSentSnapshot,omitempty"`
 }
 
 // BackupList is a list of [Backup]. Required to perform a Watch.
