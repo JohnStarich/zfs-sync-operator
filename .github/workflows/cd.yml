@@ -6,20 +6,7 @@ on:
       - v[0-9]+.[0-9]+.[0-9]+
 
 jobs:
-  helm:
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-      contents: read
-    steps:
-    - uses: actions/checkout@v4
-    - name: Log in to registry
-      run: docker login ghcr.io -u ${{ github.actor }} --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
-    - uses: azure/setup-helm@v4.3.0
-    - name: Deploy Helm chart
-      run: make deploy-helm
-
-  operator:
+  publish:
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -28,5 +15,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Log in to registry
         run: docker login ghcr.io -u ${{ github.actor }} --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+      - uses: azure/setup-helm@v4.3.0
+      # Deploy operator image before publishing new Helm chart advertising the image
       - name: Deploy operator image
         run: make deploy-operator
+      - name: Deploy Helm chart
+        run: make deploy-helm
