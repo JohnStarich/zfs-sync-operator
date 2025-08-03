@@ -6,7 +6,7 @@ CONTAINER_BUILDER = $(shell which podman 2>/dev/null || which docker)
 
 # Define versions for this build. For tagged releases, IMAGE_TAG and SEMANTIC_VERSION are the same semantic version value.
 # For untagged builds, like in CI or a local environment, IMAGE_TAG is the current commit hash and SEMANTIC_VERSION uses the default of 0.0.0.
-ifeq (${GITHUB_REF_TYPE},tag})
+ifeq (${GITHUB_REF_TYPE},tag)
 	IMAGE_TAG := ${GITHUB_REF_NAME:v%=%}
 	SEMANTIC_VERSION := ${GITHUB_REF_NAME:v%=%}
 else
