@@ -1,14 +1,18 @@
 SHELL = bash
 
-# Define versions for this build. For tagged releases, IMAGE_TAG and SEMANTIC_VERSION are the same semantic version value (with 'v' prefix).
-# For untagged builds, like in CI or a local environment, IMAGE_TAG is the current commit hash and SEMANTIC_VERSION uses the default of v0.0.0.
-IMAGE_TAG := $(or ${GITHUB_REF_NAME},$(shell git rev-parse --verify HEAD))
-SEMANTIC_VERSION := $(or ${GITHUB_REF_NAME},v0.0.0)
-export
-
 LINT_VERSION = 2.1.6
 GO_BIN = $(shell printf '%s/bin' "$$(go env GOPATH)")
 CONTAINER_BUILDER = $(shell which podman 2>/dev/null || which docker)
+
+# Define versions for this build. For tagged releases, IMAGE_TAG and SEMANTIC_VERSION are the same semantic version value.
+# For untagged builds, like in CI or a local environment, IMAGE_TAG is the current commit hash and SEMANTIC_VERSION uses the default of 0.0.0.
+ifeq (${GITHUB_REF_TYPE},tag})
+	IMAGE_TAG := ${GITHUB_REF_NAME:v%=%}
+	SEMANTIC_VERSION := ${GITHUB_REF_NAME:v%=%}
+else
+	IMAGE_TAG := $(shell git rev-parse --verify HEAD)
+	SEMANTIC_VERSION := 0.0.0
+endif
 
 .PHONY: lint-deps
 lint-deps:
@@ -28,7 +32,7 @@ test:
 build:
 	"${CONTAINER_BUILDER}" build \
 		--file Containerfile \
-		--tag "ghcr.io/johnstarich/zfs-sync-operator:$${IMAGE_TAG#v}" \
+		--tag "ghcr.io/johnstarich/zfs-sync-operator:${IMAGE_TAG}" \
 		.
 
 .PHONY: run
@@ -43,14 +47,14 @@ package-helm:
 		exit 2; \
 	fi
 	helm package \
-		--version "$${SEMANTIC_VERSION#v}" \
+		--version "${SEMANTIC_VERSION}" \
 		--destination ignore/charts \
 		internal/config
 
 .PHONY: deploy-operator
 deploy-operator: build
-	"${CONTAINER_BUILDER}" push "ghcr.io/johnstarich/zfs-sync-operator:$${IMAGE_TAG#v}"
+	"${CONTAINER_BUILDER}" push "ghcr.io/johnstarich/zfs-sync-operator:${IMAGE_TAG}"
 
 .PHONY: deploy-helm
 deploy-helm: package-helm
-	helm push "ignore/charts/zfs-sync-operator-helm-charts-$${SEMANTIC_VERSION#v}.tgz" oci://ghcr.io/johnstarich
+	helm push "ignore/charts/zfs-sync-operator-helm-charts-${SEMANTIC_VERSION}.tgz" oci://ghcr.io/johnstarich
