@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
       - name: Log in to registry
         run: docker login ghcr.io -u ${{ github.actor }} --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
       - uses: azure/setup-helm@v4.3.0
@@ -20,4 +23,10 @@ jobs:
       - name: Deploy operator image
         run: make deploy-operator
       - name: Deploy Helm chart
-        run: make deploy-helm
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          git fetch origin gh-pages
+          make deploy-helm
+        env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"

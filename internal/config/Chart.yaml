@@ -1,5 +1,5 @@
 apiVersion: v2
-name: zfs-sync-operator-helm-charts
+name: zfs-sync-operator
 description: Sync ZFS backups to an offsite location natively in Kubernetes.
 sources:
   - https://github.com/johnstarich/zfs-sync-operator

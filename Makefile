@@ -51,10 +51,28 @@ package-helm:
 		--destination ignore/charts \
 		internal/config
 
+.PHONY: deploy-helm
+deploy-helm: package-helm
+	@set -e; if ! which cr 2>/dev/null; then \
+		curl -sSL "https://github.com/helm/chart-releaser/releases/download/v1.8.1/chart-releaser_1.8.1_$$(go env GOOS)_$$(go env GOARCH).tar.gz" | tar -xvzO cr > "${GO_BIN}/cr"; \
+		chmod +x "${GO_BIN}/cr"; \
+	fi
+	# NOTE: Local uploads may panic if using ssh or git remote URLs: https://github.com/helm/chart-releaser/issues/124
+	"${GO_BIN}/cr" upload \
+		--git-repo zfs-sync-operator \
+		--owner johnstarich \
+		--package-path ignore/charts \
+		--pr \
+		--skip-existing \
+		--token "${GITHUB_TOKEN}"
+	"${GO_BIN}/cr" index \
+		--git-repo zfs-sync-operator \
+		--index-path . \
+		--owner johnstarich \
+		--package-path ignore/charts \
+		--push \
+		--token "${GITHUB_TOKEN}"
+
 .PHONY: deploy-operator
 deploy-operator: build
 	"${CONTAINER_BUILDER}" push "ghcr.io/johnstarich/zfs-sync-operator:${IMAGE_TAG}"
-
-.PHONY: deploy-helm
-deploy-helm: package-helm
-	helm push "ignore/charts/zfs-sync-operator-helm-charts-${SEMANTIC_VERSION}.tgz" oci://ghcr.io/johnstarich
