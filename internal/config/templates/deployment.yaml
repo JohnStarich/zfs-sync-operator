@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zfs-sync-operator
+  labels:
+    app: zfs-sync-operator
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zfs-sync-operator
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: zfs-sync-operator
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - zfs-sync-operator
+            topologyKey: kubernetes.io/hostname
+      containers:
+        - name: zfs-sync-operator
+          image: "ghcr.io/johnstarich/zfs-sync-operator:{{ .Chart.Version }}"
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+      serviceAccountName: zfs-sync-operator

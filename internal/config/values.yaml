@@ -1,0 +1,13 @@
+# Adjust resource requirements and limits.
+resources:
+  #limits:
+  #  cpu: 100m
+  #  memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Add secrets to pull the container image.
+# More information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+#imagePullSecrets:
+#  - name: mysecret

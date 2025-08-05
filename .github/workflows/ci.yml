@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -25,3 +26,18 @@ jobs:
         go-version: stable
     - name: Test
       run: make test
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: make build
+
+  package-helm:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: azure/setup-helm@v4.3.0
+    - name: Package Helm chart
+      run: make package-helm

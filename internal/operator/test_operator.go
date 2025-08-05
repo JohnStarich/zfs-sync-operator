@@ -94,6 +94,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 	clock := clock.NewTest()
 	operator, err := New(ctx, testEnv.RESTConfig(), Config{
 		LogHandler:         testlog.NewLogHandler(tb, level),
+		HealthProbePort:    "0",
 		MetricsPort:        "0",
 		Namespace:          namespace,
 		clock:              clock,
