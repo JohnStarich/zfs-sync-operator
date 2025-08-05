@@ -35,6 +35,5 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
-        runAsGroup: 1000
-        runAsUser: 1000
+        runAsNonRoot: true
       serviceAccountName: zfs-sync-operator
