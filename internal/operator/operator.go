@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -75,6 +76,7 @@ type Operator struct {
 
 // Config contains configuration to set up an [Operator]
 type Config struct {
+	HealthProbePort    string
 	LogHandler         slog.Handler
 	MetricsPort        string
 	Namespace          string
@@ -89,6 +91,9 @@ type Config struct {
 func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, error) {
 	logger := logr.FromSlogHandler(c.LogHandler)
 	ctx = log.IntoContext(ctx, logger)
+	if c.HealthProbePort == "" {
+		c.HealthProbePort = "8000"
+	}
 	if c.MetricsPort == "" {
 		c.MetricsPort = "8080"
 	}
@@ -110,6 +115,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	const reconcilesPerCPU = 2 // Most of the controllers are network-bound, allow a little shared CPU time
 	mgr, err := manager.New(restConfig, manager.Options{
 		Cache:                         cacheOptions,
+		HealthProbeBindAddress:        net.JoinHostPort("", c.HealthProbePort),
 		LeaderElection:                true,
 		LeaderElectionID:              name.Domain,
 		LeaderElectionNamespace:       c.Namespace,
@@ -128,6 +134,13 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err != nil {
 		return nil, err
 	}
+	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
+		return nil, err
+	}
+	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
+		return nil, err
+	}
+
 	if err := backup.RegisterReconciler(ctx, mgr); err != nil {
 		return nil, err
 	}
