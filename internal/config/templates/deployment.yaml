@@ -5,14 +5,30 @@ metadata:
   labels:
     app: zfs-sync-operator
 spec:
+  replicas: 3
   selector:
     matchLabels:
       app: zfs-sync-operator
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
   template:
     metadata:
       labels:
         app: zfs-sync-operator
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - zfs-sync-operator
+            topologyKey: kubernetes.io/hostname
       containers:
         - name: zfs-sync-operator
           image: "ghcr.io/johnstarich/zfs-sync-operator:{{ .Chart.Version }}"
