@@ -7,10 +7,13 @@ rules:
   - zfs-sync-operator.johnstarich.com
   resources:
   - backups
+  - backups/finalizers
   - backups/status
   - pools
+  - pools/finalizers
   - pools/status
   - poolsnapshots
+  - poolsnapshots/finalizers
   - poolsnapshots/status
   verbs:
   - create
