@@ -1,5 +1,6 @@
 SHELL = bash
 
+CHART_RELEASER_VERSION = 1.8.1
 LINT_VERSION = 2.1.6
 GO_BIN = $(shell printf '%s/bin' "$$(go env GOPATH)")
 CONTAINER_BUILDER = $(shell which podman 2>/dev/null || which docker)
@@ -53,10 +54,11 @@ package-helm:
 
 .PHONY: deploy-helm
 deploy-helm: package-helm
-	@set -e; if ! which cr 2>/dev/null; then \
-		curl -sSL "https://github.com/helm/chart-releaser/releases/download/v1.8.1/chart-releaser_1.8.1_$$(go env GOOS)_$$(go env GOARCH).tar.gz" | tar -xvzO cr > "${GO_BIN}/cr"; \
-		chmod +x "${GO_BIN}/cr"; \
-	fi
+	@set -e; \
+		if ! which cr 2>/dev/null; then \
+			curl -sSL "https://github.com/helm/chart-releaser/releases/download/v${CHART_RELEASER_VERSION}/chart-releaser_${CHART_RELEASER_VERSION}_$$(go env GOOS)_$$(go env GOARCH).tar.gz" | tar -xvzO cr > "${GO_BIN}/cr"; \
+			chmod +x "${GO_BIN}/cr"; \
+		fi
 	# NOTE: Local uploads may panic if using ssh or git remote URLs: https://github.com/helm/chart-releaser/issues/124
 	"${GO_BIN}/cr" upload \
 		--git-repo zfs-sync-operator \
