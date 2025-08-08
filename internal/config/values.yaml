@@ -11,3 +11,7 @@ resources:
 # More information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
 #imagePullSecrets:
 #  - name: mysecret
+
+# Enable PrometheusRule resources to be created. Automatically alerts on problems requiring intervention.
+prometheusMonitoring:
+  enabled: true

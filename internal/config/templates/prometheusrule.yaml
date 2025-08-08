@@ -1,0 +1,20 @@
+#{{ if .Values.prometheusMonitoring.enabled }}
+# NOTE: Alert does not appear in the OpenShift Console notification bell currently: https://issues.redhat.com/browse/OBSDA-1039
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: zfs-sync-operator
+spec:
+  groups:
+    - name: zfs-sync-operator.rules
+      rules: []
+      #  - alert: ZFSPoolNotHealthy
+      #    expr: vector(1)
+      #    for: 5m
+      #    labels:
+      #      severity: warning
+      #      namespace: TODO
+      #    annotations:
+      #      summary: TODO
+      #      description: TODO
+#{{ end }}
