@@ -4,16 +4,19 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/johnstarich/go/datasize"
 	zfsbackup "github.com/johnstarich/zfs-sync-operator/internal/backup"
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
+	"github.com/johnstarich/zfs-sync-operator/internal/metrics"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -94,8 +97,9 @@ func TestBackupReady(t *testing.T) {
 					"/usr/bin/sudo /usr/sbin/zfs receive ": {},
 				},
 			})
+			const someBackupName = "mybackup"
 			backup := zfsbackup.Backup{
-				ObjectMeta: metav1.ObjectMeta{Name: "mybackup", Namespace: run.Namespace},
+				ObjectMeta: metav1.ObjectMeta{Name: someBackupName, Namespace: run.Namespace},
 				Spec: zfsbackup.Spec{
 					Source:      corev1.LocalObjectReference{Name: source.Name},
 					Destination: corev1.LocalObjectReference{Name: destination.Name},
@@ -104,12 +108,28 @@ func TestBackupReady(t *testing.T) {
 			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &backup))
 
 			backup = zfsbackup.Backup{
-				ObjectMeta: metav1.ObjectMeta{Name: "mybackup", Namespace: run.Namespace},
+				ObjectMeta: metav1.ObjectMeta{Name: someBackupName, Namespace: run.Namespace},
 			}
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
 				assert.Equal(collect, tc.expectStatus, backup.Status)
 			}, maxWait, tick, "namespace = %s", run.Namespace)
+
+			expectedMetrics := `
+# HELP zfs_sync_backup_state The status.state of each backup
+# TYPE zfs_sync_backup_state gauge
+`
+			for state := range zfsbackup.AllStates() {
+				expectedMetrics += fmt.Sprintf("zfs_sync_backup_state{name=%q,namespace=%q,state=%q} %f\n",
+					someBackupName,
+					run.Namespace,
+					state.String(),
+					metrics.CountTrue(tc.expectStatus != nil && state == tc.expectStatus.State),
+				)
+			}
+			assert.NoError(t, testutil.GatherAndCompare(run.Metrics, strings.NewReader(expectedMetrics),
+				"zfs_sync_backup_state",
+			))
 		})
 	}
 }
@@ -298,6 +318,31 @@ func TestBackupSendAndReceive(t *testing.T) {
 	assert.True(t, send1Called, "ZFS send should be called for the snapshot's dataset 1")
 	assert.True(t, send2Called, "ZFS send should be called for the snapshot's dataset 2")
 	assert.True(t, receiveCalled, "ZFS receive should be called for sent snapshots")
+
+	{ // verify at least 1 snapshot was recorded as sent
+		var compareErr error
+		const maxSentSnapshots = 50 // arbitrary, reasonable upper bound
+		for i := range maxSentSnapshots {
+			sentSnapshots := i + 1
+			expectedMetrics := fmt.Sprintf(`
+# HELP zfs_sync_backup_sent_snapshots The number of successfully sent snapshots
+# TYPE zfs_sync_backup_sent_snapshots counter
+zfs_sync_backup_sent_snapshots{name=%q,namespace=%q} %d
+`, someBackup, run.Namespace, sentSnapshots)
+			compareErr = testutil.GatherAndCompare(run.Metrics, strings.NewReader(expectedMetrics), "zfs_sync_backup_sent_snapshots")
+			if compareErr == nil {
+				break
+			}
+		}
+		assert.NoError(t, compareErr)
+	}
+
+	count, err := testutil.GatherAndCount(run.Metrics, "zfs_sync_backup_sent_snapshots")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	count, err = testutil.GatherAndCount(run.Metrics, "zfs_sync_backup_sent_bytes")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
 }
 
 func TestBackupSendAndReceiveIncremental(t *testing.T) {
@@ -585,7 +630,8 @@ func BenchmarkSendSpeed(b *testing.B) {
 					startedSending = true
 				case // no action
 					zfsbackup.Error,
-					zfsbackup.NotReady:
+					zfsbackup.NotReady,
+					zfsbackup.UnexpectedError:
 				}
 				return true
 			})

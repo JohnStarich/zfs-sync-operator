@@ -10,9 +10,12 @@ import (
 
 	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/idgen"
+	"github.com/johnstarich/zfs-sync-operator/internal/metrics"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -37,17 +40,31 @@ type Reconciler struct {
 	client         client.Client
 	clock          clock.Clock
 	maxSessionWait time.Duration
+	stateGauge     *prometheus.GaugeVec
 	uuidGenerator  idgen.IDGenerator
 }
 
 // RegisterReconciler registers a Pool reconciler with manager
-func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSessionWait time.Duration, clock clock.Clock, uuidGenerator idgen.IDGenerator) error {
+func RegisterReconciler(ctx context.Context, manager manager.Manager, metricsRegistry prometheus.Registerer, maxSessionWait time.Duration, clock clock.Clock, uuidGenerator idgen.IDGenerator) error {
+	const (
+		poolSubsystem = "pool"
+	)
 	ctrl, err := controller.New("pool", manager, controller.Options{
 		Reconciler: &Reconciler{
 			client:         manager.GetClient(),
 			clock:          clock,
 			maxSessionWait: maxSessionWait,
-			uuidGenerator:  uuidGenerator,
+			stateGauge: metrics.MustRegister(metricsRegistry, prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: name.Metrics,
+				Subsystem: poolSubsystem,
+				Name:      "state",
+				Help:      "The status.state of each pool",
+			}, []string{
+				metrics.NameLabel,
+				metrics.NamespaceLabel,
+				metrics.StateLabel,
+			})),
+			uuidGenerator: uuidGenerator,
 		},
 	})
 	if err != nil {
@@ -78,19 +95,42 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager, maxSession
 func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("checking request", "request", request)
-	var pool Pool
-	if err := r.client.Get(ctx, request.NamespacedName, &pool); err != nil {
-		return reconcile.Result{}, err
+	var pool *Pool
+	{
+		var getPool Pool
+		if err := r.client.Get(ctx, request.NamespacedName, &getPool); err != nil && !apierrors.IsNotFound(err) {
+			return reconcile.Result{}, err
+		} else if err == nil {
+			logger.Info("got pool", "pool", getPool.Spec, "generation", getPool.Generation)
+			pool = &getPool
+		}
 	}
-	logger.Info("got pool", "pool", pool.Spec, "generation", pool.Generation)
-	requeueAfter, reconcileErr := r.reconcile(ctx, &pool)
+	reconcileResult, reconcileErr := r.reconcile(ctx, pool)
+
+	poolStateGauge := r.stateGauge.MustCurryWith(prometheus.Labels{
+		metrics.NameLabel:      request.Name,
+		metrics.NamespaceLabel: request.Namespace,
+	})
+	for state := range AllStates() {
+		poolStateGauge.With(prometheus.Labels{metrics.StateLabel: state.String()}).Set(metrics.CountTrue(pool != nil && state == pool.Status.State))
+	}
+	return reconcileResult, reconcileErr
+}
+
+func (r *Reconciler) reconcile(ctx context.Context, pool *Pool) (reconcile.Result, error) {
+	if pool == nil { // deleted
+		return reconcile.Result{}, nil
+	}
+
+	logger := log.FromContext(ctx)
+	requeueAfter, reconcileErr := r.reconcileWithTimeout(ctx, pool, r.maxSessionWait)
 	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
 		pool.Status = &Status{
 			State:  Error,
 			Reason: reconcileErr.Error(),
 		}
-		if err := r.client.Status().Update(ctx, &pool); err != nil {
+		if err := r.client.Status().Update(ctx, pool); err != nil {
 			return reconcile.Result{}, errors.Wrap(err, "failed to update status")
 		}
 		return reconcile.Result{}, reconcileErr
@@ -101,8 +141,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	}, nil
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, pool *Pool) (requeueAfter time.Duration, err error) {
-	ctx, cancel := context.WithTimeout(ctx, r.maxSessionWait)
+func (r *Reconciler) reconcileWithTimeout(ctx context.Context, pool *Pool, timeout time.Duration) (requeueAfter time.Duration, err error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	reconcileErr := pool.WithConnection(ctx, r.client, func(connection *Connection) error {
 		var err error

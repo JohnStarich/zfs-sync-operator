@@ -16,6 +16,7 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/idgen"
 	"github.com/johnstarich/zfs-sync-operator/internal/testlog"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -58,6 +59,7 @@ func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
 // TestRunConfig contains data necessary for running tests. Returned from [RunTest].
 type TestRunConfig struct {
 	Clock     *clock.Test
+	Metrics   prometheus.Gatherer
 	Namespace string
 }
 
@@ -92,6 +94,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 		level = slog.LevelDebug
 	}
 	clock := clock.NewTest()
+	metricsRegistry := prometheus.NewPedanticRegistry()
 	operator, err := New(ctx, testEnv.RESTConfig(), Config{
 		LogHandler:         testlog.NewLogHandler(tb, level),
 		HealthProbePort:    "0",
@@ -100,6 +103,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 		clock:              clock,
 		idempotentMetrics:  true,
 		maxSessionWait:     8 * time.Second,
+		metricsRegistry:    metricsRegistry,
 		onlyWatchNamespace: namespace,
 		uuidGenerator:      idgen.NewDeterministicTest(tb),
 	})
@@ -119,6 +123,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 
 	return TestRunConfig{
 		Clock:     clock,
+		Metrics:   metricsRegistry,
 		Namespace: namespace,
 	}
 }

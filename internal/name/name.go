@@ -11,4 +11,7 @@ const (
 	// DomainPrefix is the label prefix to use for an operator property.
 	// For example: DomainPrefix + "myproperty" == "mydomain.io/myproperty"
 	DomainPrefix = Domain + "/"
+
+	// Metrics is the Prometheus namespace for this operator
+	Metrics = "zfs_sync"
 )

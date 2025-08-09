@@ -1,0 +1,52 @@
+# NOTE: Alert does not appear in the OpenShift Console notification bell currently: https://issues.redhat.com/browse/OBSDA-1039
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: zfs-sync-operator
+spec:
+  groups:
+    - name: zfs-sync-operator.rules
+      rules:
+        # TODO double check this periodically updates \/
+        - alert: ZFSPoolUnhealthy
+          expr: zfs_sync_pool_state{state!~"Online"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: |
+              ZFS Pool {{ $labels.namespace }}/{{ $labels.name }} is unhealthy with state {{ $labels.state }}
+            description: |
+              ZFS Pool {{ $labels.namespace }}/{{ $labels.name }} is unhealthy with state {{ $labels.state }}
+        - alert: ZFSBackupUnhealthy
+          expr: zfs_sync_backup_state{state!~"Ready|Sending"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: |
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is unhealthy with state {{ $labels.state }}
+            description: |
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is unhealthy with state {{ $labels.state }}
+        - alert: ZFSBackupNotProgressing
+          expr: increase(zfs_sync_backup_sent_bytes[1d]) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: |
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing
+            description: |
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing.
+              Snapshots have not been sent for > 1 day
+        - alert: ZFSBackupNotProgressing
+          expr: increase(zfs_sync_backup_sent_snapshots[1d]) == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: |
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing
+            description: |
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing.
+              Snapshots have not been sent for > 1 day
