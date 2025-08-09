@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"runtime"
 	"time"
 
@@ -135,14 +134,7 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	if err != nil {
 		return nil, err
 	}
-	if err := mgr.AddReadyzCheck("leader", func(*http.Request) error {
-		select {
-		case <-mgr.Elected():
-			return nil
-		default:
-			return errors.New("not the leader")
-		}
-	}); err != nil {
+	if err := mgr.AddReadyzCheck("ping", healthz.Ping); err != nil {
 		return nil, err
 	}
 	if err := mgr.AddHealthzCheck("ping", healthz.Ping); err != nil {
