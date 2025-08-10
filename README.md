@@ -16,9 +16,11 @@ See [Custom Resources](#custom-resources) for details on each custom resource.
 
 There's multiple options to install the operator on any Kubernetes cluster:
 
-* [Kubernetes with Helm CLI](#kubernetes-with-helm-cli)
-* [OpenShift Console](#okd-or-openshift-console)
-* [OKD Console](#okd-or-openshift-console)
+* Manual installation and upgrades:
+    - [Kubernetes with Helm CLI](#kubernetes-with-helm-cli)
+* Automated installation and upgrades:
+    - [OpenShift Console](#okd-or-openshift-console)
+    - [OKD Console](#okd-or-openshift-console)
 
 > [!NOTE]
 > Install the operator on your cluster only once.
@@ -43,6 +45,8 @@ To install on Kubernetes with the Helm CLI:
     * Note: If you do not have the [Prometheus Operator](https://prometheus-operator.dev/) installed, then you must set `prometheusMonitoring`'s `enabled` value to `false`.
 6. Run `helm install -n zfs-sync-operator-system -f values.yaml zfs-sync-operator zfs-sync-operator/zfs-sync-operator` to install the operator
 
+For details on using Helm effectively, like to perform upgrades or rollbacks, see the [Helm docs](https://helm.sh/docs/intro/using_helm/).
+
 ### OKD or OpenShift Console
 
 Use the web console in [OKD](https://okd.io/) or [OpenShift](https://openshift.com/) to get up and running quickly:
@@ -55,6 +59,8 @@ Use the web console in [OKD](https://okd.io/) or [OpenShift](https://openshift.c
 4. Search `ZFS Sync Operator`, click Create
 5. Create a new project with the dropdown menu at the top of the page, name it `zfs-sync-operator-system`
 6. Click Confirm to create the Helm chart release and install the operator
+
+For day 2 operations, like upgrading, navigate to Helm, then Releases, and select your release. Use `Actions` to perform an upgrade or rollback.
 
 ## Custom Resources
 
