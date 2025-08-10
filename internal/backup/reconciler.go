@@ -44,6 +44,7 @@ const (
 	destinationProperty = ".spec.destination.name"
 )
 
+// SendStatusUpdateInterval is the time between status updates during a send
 const SendStatusUpdateInterval = 30 * time.Second
 
 // RegisterReconciler registers a Backup reconciler with manager
