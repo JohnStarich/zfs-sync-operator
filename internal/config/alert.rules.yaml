@@ -28,7 +28,7 @@ spec:
             description: |
               ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is unhealthy with state {{ $labels.state }}
         - alert: ZFSBackupNotProgressing
-          expr: zfs_sync_backup_in_progress_snapshot_deadline != 0 && increase(zfs_sync_backup_sent_bytes[1h]) == 0
+          expr: increase(zfs_sync_backup_sent_bytes[1h]) == 0 and zfs_sync_backup_in_progress_snapshot_deadline != 0
           for: 1h
           labels:
             severity: critical
@@ -39,14 +39,14 @@ spec:
               ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing.
               Data transfer rate has been zero for more than 1 hour.
         - alert: ZFSBackupIsBehindSchedule
-          expr: zfs_sync_backup_in_progress_snapshot_deadline != 0 && zfs_sync_backup_in_progress_snapshot_deadline < time()
+          expr: time() - zfs_sync_backup_in_progress_snapshot_deadline > 0 and zfs_sync_backup_in_progress_snapshot_deadline != 0
           for: 15m
           labels:
             severity: critical
           annotations:
             summary: |
-              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is falling behind the snapshot schedule
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is falling behind the snapshot schedule ({{ $value | humanizeDuration }})
             description: |
-              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is falling behind the snapshot schedule
-              The current snapshot send should have completed sending by now. The deadline {{ }} was {{ }} ago.
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is falling behind the snapshot schedule.
+              The current snapshot send should have completed sending by now. The deadline was {{ $value | humanizeDuration }} ago.
               Check for a slow or unstable network connection to both source and destination pools.
