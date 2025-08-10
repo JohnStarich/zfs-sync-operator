@@ -190,6 +190,8 @@ func (r *Reconciler) reconcileWithConnection(ctx context.Context, pool *Pool, co
 			}
 		}
 		logger.Info("Requeuing to handle next interval", "requeueAfter", requeueAfter)
+	} else {
+		requeueAfter = 2 * time.Hour // For pools without snapshot schedules, check in on their health infrequently.
 	}
 	return requeueAfter, nil
 }

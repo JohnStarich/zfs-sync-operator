@@ -7,7 +7,6 @@ spec:
   groups:
     - name: zfs-sync-operator.rules
       rules:
-        # TODO double check this periodically updates \/
         - alert: ZFSPoolUnhealthy
           expr: zfs_sync_pool_state{state!~"Online"} > 0
           for: 5m
@@ -29,8 +28,8 @@ spec:
             description: |
               ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is unhealthy with state {{ $labels.state }}
         - alert: ZFSBackupNotProgressing
-          expr: increase(zfs_sync_backup_sent_bytes[1d]) == 0
-          for: 5m
+          expr: zfs_sync_backup_in_progress_snapshot_deadline != 0 && increase(zfs_sync_backup_sent_bytes[1h]) == 0
+          for: 1h
           labels:
             severity: critical
           annotations:
@@ -38,15 +37,16 @@ spec:
               ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing
             description: |
               ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing.
-              Snapshots have not been sent for > 1 day
-        - alert: ZFSBackupNotProgressing
-          expr: increase(zfs_sync_backup_sent_snapshots[1d]) == 0
-          for: 5m
+              Data transfer rate has been zero for more than 1 hour.
+        - alert: ZFSBackupIsBehindSchedule
+          expr: zfs_sync_backup_in_progress_snapshot_deadline != 0 && zfs_sync_backup_in_progress_snapshot_deadline < time()
+          for: 15m
           labels:
             severity: critical
           annotations:
             summary: |
-              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is falling behind the snapshot schedule
             description: |
-              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is not progressing.
-              Snapshots have not been sent for > 1 day
+              ZFS Backup {{ $labels.namespace }}/{{ $labels.name }} is falling behind the snapshot schedule
+              The current snapshot send should have completed sending by now. The deadline {{ }} was {{ }} ago.
+              Check for a slow or unstable network connection to both source and destination pools.

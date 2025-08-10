@@ -32,16 +32,19 @@ import (
 
 // Reconciler reconciles Backup resources to validate their Pools and associated connections
 type Reconciler struct {
-	client        client.Client
-	sentBytes     *prometheus.CounterVec
-	sentSnapshots *prometheus.CounterVec
-	stateGauge    *prometheus.GaugeVec
+	client                      client.Client
+	inProgressSnapshotDeadlines *prometheus.GaugeVec
+	sentBytes                   *prometheus.CounterVec
+	sentSnapshots               *prometheus.CounterVec
+	stateGauge                  *prometheus.GaugeVec
 }
 
 const (
 	sourceProperty      = ".spec.source.name"
 	destinationProperty = ".spec.destination.name"
 )
+
+const SendStatusUpdateInterval = 30 * time.Second
 
 // RegisterReconciler registers a Backup reconciler with manager
 func RegisterReconciler(ctx context.Context, manager manager.Manager, metricsRegistry prometheus.Registerer) error {
@@ -50,6 +53,15 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager, metricsReg
 	)
 	reconciler := &Reconciler{
 		client: manager.GetClient(),
+		inProgressSnapshotDeadlines: metrics.MustRegister(metricsRegistry, prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: name.Metrics,
+			Subsystem: backupSubsystem,
+			Name:      "in_progress_snapshot_deadline",
+			Help:      "The deadline for the current in progress snapshot. Deadline is represented as the number of seconds since January 1, 1970 UTC - same as the Prometheus time() function.",
+		}, []string{
+			metrics.NameLabel,
+			metrics.NamespaceLabel,
+		})),
 		sentBytes: metrics.MustRegister(metricsRegistry, prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: name.Metrics,
 			Subsystem: backupSubsystem,
@@ -246,6 +258,7 @@ func (r *Reconciler) reconcileValid(ctx context.Context, backup *Backup) (State,
 	if source.Spec == nil || source.Spec.Snapshots == nil {
 		return NotReady, errors.Errorf("source pool %q must define .spec.snapshots, either empty (the default schedule) or custom intervals", source.Name)
 	}
+
 	if err := validatePoolIsHealthy("destination", destination); err != nil {
 		return NotReady, err
 	}
@@ -281,6 +294,12 @@ func (r *Reconciler) reconcileValid(ctx context.Context, backup *Backup) (State,
 	}
 	sendLastSnapshot := sendSnapshots[len(sendSnapshots)-1]
 	logger.Info("Sending", "snapshot", sendLastSnapshot.Name)
+	if sendLastSnapshot.Spec.Deadline != nil {
+		r.inProgressSnapshotDeadlines.With(prometheus.Labels{
+			metrics.NameLabel:      backup.Name,
+			metrics.NamespaceLabel: backup.Namespace,
+		}).Set(float64(sendLastSnapshot.Spec.Deadline.Unix()))
+	}
 
 	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
 		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
@@ -339,9 +358,14 @@ func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, sourc
 		metrics.NameLabel:      backup.Name,
 		metrics.NamespaceLabel: backup.Namespace,
 	}).Inc()
-	backup.Status.InProgressSnapshot = nil
-	backup.Status.LastSentSnapshot = &corev1.LocalObjectReference{Name: snapshot.Name}
-	return r.client.Status().Update(ctx, backup)
+	r.inProgressSnapshotDeadlines.With(prometheus.Labels{
+		metrics.NameLabel:      backup.Name,
+		metrics.NamespaceLabel: backup.Namespace,
+	}).Set(0)
+	return r.updateStatus(ctx, client.ObjectKeyFromObject(backup), func(s *Status) {
+		s.InProgressSnapshot = nil
+		s.LastSentSnapshot = &corev1.LocalObjectReference{Name: snapshot.Name}
+	})
 }
 
 func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, sourceDatasetName, snapshotName string) error {
@@ -412,9 +436,8 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 			metrics.NameLabel:      backup.Name,
 			metrics.NamespaceLabel: backup.Namespace,
 		})
-		const statusUpdateInterval = 30 * time.Second
 		lastCount := countWriter.Count()
-		ticker := time.NewTicker(statusUpdateInterval)
+		ticker := time.NewTicker(SendStatusUpdateInterval)
 		for {
 			status := Status{
 				State: Sending,
@@ -423,7 +446,7 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 			delta := newCount - lastCount
 			sentBytes.Add(float64(delta))
 			sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
-			rate := delta / int64(statusUpdateInterval/time.Second)
+			rate := delta / int64(SendStatusUpdateInterval/time.Second)
 			rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
 			status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
 			if newCount > 0 {
@@ -469,6 +492,25 @@ func validatePoolIsHealthy(contextualName string, p pool.Pool) (returnedErr erro
 	default:
 		return errors.Errorf("%s: %s", p.Status.State, p.Status.Reason)
 	}
+}
+
+func (r *Reconciler) updateStatus(ctx context.Context, key client.ObjectKey, update func(*Status)) error {
+	logger := log.FromContext(ctx)
+	const maxAttempts = 3
+	var err error
+	for attempt := range maxAttempts {
+		var backup Backup
+		err = r.client.Get(ctx, key, &backup)
+		if err == nil {
+			update(backup.Status)
+			err = r.client.Status().Update(ctx, &backup)
+			if err == nil {
+				return nil
+			}
+		}
+		logger.Info("Failed to update status", "attempt", attempt, "err", err)
+	}
+	return err
 }
 
 func (r *Reconciler) patchStatus(ctx context.Context, namespace, name string, status Status) error {
