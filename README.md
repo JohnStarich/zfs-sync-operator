@@ -45,7 +45,7 @@ To install on Kubernetes with the Helm CLI:
     * Note: If you do not have the [Prometheus Operator](https://prometheus-operator.dev/) installed, then you must set `prometheusMonitoring`'s `enabled` value to `false`.
 6. Run `helm install -n zfs-sync-operator-system -f values.yaml zfs-sync-operator zfs-sync-operator/zfs-sync-operator` to install the operator
 
-For details on using Helm effectively, like to perform upgrades or rollbacks, see the [Helm docs](https://helm.sh/docs/intro/using_helm/).
+For day 2 operations, like `helm upgrade`s or `rollback`s, view the [Helm docs](https://helm.sh/docs/intro/using_helm/) for best practices.
 
 ### OKD or OpenShift Console
 
