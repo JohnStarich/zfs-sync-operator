@@ -69,9 +69,84 @@ For day 2 operations, like upgrading, navigate to Helm, then Releases, and selec
 A Pool represents a ZFS pool and its connection details, including WireGuard and SSH.
 Configure a snapshots schedule for automatic ZFS snapshots on one or more datasets, and clean them up with history limits.
 
+```yaml
+apiVersion: zfs-sync-operator.johnstarich.com/v1alpha1
+kind: Pool
+metadata:
+  name: my-pool
+  namespace: offsite-backups
+spec:
+  name: tank
+  ssh:
+    user: core
+    address: 192.168.1.2:22
+    privateKey:
+      name: my-pool-keys
+      key: ssh-private-key.pem
+  # Optionally connect to WireGuard first, then tunnel SSH through it.
+  wireguard:
+    localAddress: 10.13.13.2
+    peerAddress: my-host.local:51821
+    peerPublicKey:
+      name: my-pool-keys
+      key: wireguard-peer-public-key
+    # presharedKey is optional, but highly recommended for a more secure connection setup
+    presharedKey:
+      name: my-pool-keys
+      key: wireguard-preshared-key
+    localPrivateKey:
+      name: my-pool-keys
+      key: wireguard-local-private-key
+  # Optionally specify a snapshot schedule.
+  # This is required on a Backup's source pool.
+  snapshots:
+    template:
+      datasets:
+        - name: tank/this-one
+        - name: tank/this-one-and-all-child-datasets
+          recursive: {}
+        - name: tank/this-one-and-most-child-datasets
+          recursive:
+            skipChildren: # All except but-not-that-one
+              - tank/this-one-and-most-child-datasets/but-not-that-one
+    # Optionally define custom snapshot intervals.
+    # Defaults to hourly, daily, weekly, monthly, and yearly intervals.
+    #
+    # intervals:
+    #   - name: hourly
+    #     historyLimit: 24
+    #     interval: 1h0m0s
+    #   - name: daily
+    #     historyLimit: 7
+    #     interval: 24h
+```
+
 ### PoolSnapshot
 
 A PoolSnapshot represents a set of ZFS dataset snapshots. These are full lifecycle, so deleting them initiates a snapshot destroy on the connected Pool.
+
+These are automatically created and deleted when using a Pool's `.spec.snapshots` field.
+
+```yaml
+apiVersion: zfs-sync-operator.johnstarich.com/v1alpha1
+kind: PoolSnapshot
+metadata:
+  name: my-pool-snapshot
+  namespace: offsite-backups
+spec:
+  pool:
+    name: my-pool  # Pool resource in the same namespace
+  datasets:
+    - name: tank/this-one
+    - name: tank/this-one-and-all-child-datasets
+      recursive: {}
+    - name: tank/this-one-and-most-child-datasets
+      recursive:
+        skipChildren: # All except but-not-that-one
+          - tank/this-one-and-most-child-datasets/but-not-that-one
+  # Optional deadline, stops attempting to create the snapshot if it does not complete by this timestamp.
+  deadline: 2000-12-31T15:04:05Z
+```
 
 ### Backup
 
@@ -85,3 +160,15 @@ In summary, a Backup:
 3. Executes `zfs receive` on the destination over SSH
 4. Pipes snapshot data from `zfs send` standard output to `zfs receive` standard input
 
+```yaml
+apiVersion: zfs-sync-operator.johnstarich.com/v1alpha1
+kind: Backup
+metadata:
+  name: my-backup
+  namespace: offsite-backups
+spec:
+  source:
+    name: my-pool  # The name of a Pool resource in the same namespace. This is where data is fetched.
+  destination:
+    name: my-other-pool  # The name of another Pool resource in the same namespace. This is where data is sent.
+```
