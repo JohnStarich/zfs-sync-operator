@@ -18,6 +18,7 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientsetscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
@@ -80,11 +82,12 @@ type Config struct {
 	LogHandler         slog.Handler
 	MetricsPort        string
 	Namespace          string
-	clock              clock.Clock       // in tests only, control time for more consistent, assertable results
-	idempotentMetrics  bool              // disables safety checks for double metrics registrations
-	maxSessionWait     time.Duration     // allows tests to shorten wait times for faster pass/fail results
-	onlyWatchNamespace string            // in tests only, restrict watches to this namespace
-	uuidGenerator      idgen.IDGenerator // in tests only, produce deterministic unique identifiers
+	clock              clock.Clock           // in tests only, control time for more consistent, assertable results
+	idempotentMetrics  bool                  // disables safety checks for double metrics registrations
+	maxSessionWait     time.Duration         // allows tests to shorten wait times for faster pass/fail results
+	metricsRegistry    prometheus.Registerer // in tests only, verify metrics are registered and emitted
+	onlyWatchNamespace string                // in tests only, restrict watches to this namespace
+	uuidGenerator      idgen.IDGenerator     // in tests only, produce deterministic unique identifiers
 }
 
 // New returns a new [Operator]
@@ -99,6 +102,9 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 	}
 	if c.maxSessionWait == 0 {
 		c.maxSessionWait = 1 * time.Minute
+	}
+	if c.metricsRegistry == nil {
+		c.metricsRegistry = metrics.Registry
 	}
 	if c.clock == nil {
 		c.clock = &clock.Real{}
@@ -141,10 +147,10 @@ func New(ctx context.Context, restConfig *rest.Config, c Config) (*Operator, err
 		return nil, err
 	}
 
-	if err := backup.RegisterReconciler(ctx, mgr); err != nil {
+	if err := backup.RegisterReconciler(ctx, mgr, c.metricsRegistry); err != nil {
 		return nil, err
 	}
-	if err := pool.RegisterReconciler(ctx, mgr, c.maxSessionWait, c.clock, c.uuidGenerator); err != nil {
+	if err := pool.RegisterReconciler(ctx, mgr, c.metricsRegistry, c.maxSessionWait, c.clock, c.uuidGenerator); err != nil {
 		return nil, err
 	}
 

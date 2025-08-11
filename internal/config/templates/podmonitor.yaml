@@ -1,4 +1,4 @@
-#{{ if .Values.prometheusMonitoring.enabled }}
+{{- if .Values.prometheusMonitoring.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -11,4 +11,4 @@ spec:
       app: zfs-sync-operator
   podMetricsEndpoints:
   - port: http-metrics
-#{{ end }}
+{{- end }}

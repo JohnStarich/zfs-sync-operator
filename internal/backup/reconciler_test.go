@@ -1,19 +1,23 @@
 package backup_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/johnstarich/go/datasize"
 	zfsbackup "github.com/johnstarich/zfs-sync-operator/internal/backup"
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
+	"github.com/johnstarich/zfs-sync-operator/internal/metrics"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -94,8 +98,9 @@ func TestBackupReady(t *testing.T) {
 					"/usr/bin/sudo /usr/sbin/zfs receive ": {},
 				},
 			})
+			const someBackupName = "mybackup"
 			backup := zfsbackup.Backup{
-				ObjectMeta: metav1.ObjectMeta{Name: "mybackup", Namespace: run.Namespace},
+				ObjectMeta: metav1.ObjectMeta{Name: someBackupName, Namespace: run.Namespace},
 				Spec: zfsbackup.Spec{
 					Source:      corev1.LocalObjectReference{Name: source.Name},
 					Destination: corev1.LocalObjectReference{Name: destination.Name},
@@ -104,12 +109,28 @@ func TestBackupReady(t *testing.T) {
 			require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &backup))
 
 			backup = zfsbackup.Backup{
-				ObjectMeta: metav1.ObjectMeta{Name: "mybackup", Namespace: run.Namespace},
+				ObjectMeta: metav1.ObjectMeta{Name: someBackupName, Namespace: run.Namespace},
 			}
 			require.EventuallyWithTf(t, func(collect *assert.CollectT) {
 				assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
 				assert.Equal(collect, tc.expectStatus, backup.Status)
 			}, maxWait, tick, "namespace = %s", run.Namespace)
+
+			expectedMetrics := `
+# HELP zfs_sync_backup_state The status.state of each backup
+# TYPE zfs_sync_backup_state gauge
+`
+			for state := range zfsbackup.AllStates() {
+				expectedMetrics += fmt.Sprintf("zfs_sync_backup_state{name=%q,namespace=%q,state=%q} %f\n",
+					someBackupName,
+					run.Namespace,
+					state.String(),
+					metrics.CountTrue(tc.expectStatus != nil && state == tc.expectStatus.State),
+				)
+			}
+			assert.NoError(t, testutil.GatherAndCompare(run.Metrics, strings.NewReader(expectedMetrics),
+				"zfs_sync_backup_state",
+			))
 		})
 	}
 }
@@ -298,6 +319,31 @@ func TestBackupSendAndReceive(t *testing.T) {
 	assert.True(t, send1Called, "ZFS send should be called for the snapshot's dataset 1")
 	assert.True(t, send2Called, "ZFS send should be called for the snapshot's dataset 2")
 	assert.True(t, receiveCalled, "ZFS receive should be called for sent snapshots")
+
+	{ // verify at least 1 snapshot was recorded as sent
+		var compareErr error
+		const maxSentSnapshots = 50 // arbitrary, reasonable upper bound
+		for i := range maxSentSnapshots {
+			sentSnapshots := i + 1
+			expectedMetrics := fmt.Sprintf(`
+# HELP zfs_sync_backup_sent_snapshots The number of successfully sent snapshots
+# TYPE zfs_sync_backup_sent_snapshots counter
+zfs_sync_backup_sent_snapshots{name=%q,namespace=%q} %d
+`, someBackup, run.Namespace, sentSnapshots)
+			compareErr = testutil.GatherAndCompare(run.Metrics, strings.NewReader(expectedMetrics), "zfs_sync_backup_sent_snapshots")
+			if compareErr == nil {
+				break
+			}
+		}
+		assert.NoError(t, compareErr)
+	}
+
+	count, err := testutil.GatherAndCount(run.Metrics, "zfs_sync_backup_sent_snapshots")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+	count, err = testutil.GatherAndCount(run.Metrics, "zfs_sync_backup_sent_bytes")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
 }
 
 func TestBackupSendAndReceiveIncremental(t *testing.T) {
@@ -585,7 +631,8 @@ func BenchmarkSendSpeed(b *testing.B) {
 					startedSending = true
 				case // no action
 					zfsbackup.Error,
-					zfsbackup.NotReady:
+					zfsbackup.NotReady,
+					zfsbackup.UnexpectedError:
 				}
 				return true
 			})
@@ -607,4 +654,94 @@ func watchBackupStatusUpdates(tb testing.TB, namespace string, handleStatus func
 			}
 		}
 	}
+}
+
+func TestBackupSendingStateAndMetrics(t *testing.T) {
+	t.Parallel()
+	run := operator.RunTest(t, TestEnv)
+	sourceSSHResults := make(map[string]*ssh.TestExecResult)
+	const someDataset = "source/some-dataset"
+	source := makePool(t, "source", run, TestPoolOptions{
+		SSHExecResults: sourceSSHResults,
+		SSHExecPrefixResults: map[string]*ssh.TestExecResult{
+			`/usr/bin/sudo /usr/sbin/zfs snapshot -r ` + someDataset: {ExitCode: 0},
+		},
+	})
+	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
+		Intervals: []zfspool.SnapshotIntervalSpec{
+			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+		},
+		Template: zfspool.SnapshotSpecTemplate{
+			Datasets: []zfspool.DatasetSelector{
+				{Name: someDataset, Recursive: &zfspool.RecursiveDatasetSpec{}},
+			},
+		},
+	}
+	require.NoError(t, TestEnv.Client().Update(TestEnv.Context(), &source))
+	var sourceSnapshot zfspool.PoolSnapshot
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		var sourceSnapshots zfspool.PoolSnapshotList
+		assert.NoError(collect, TestEnv.Client().List(TestEnv.Context(), &sourceSnapshots, &client.ListOptions{Namespace: run.Namespace}))
+		if assert.Len(collect, sourceSnapshots.Items, 1) {
+			sourceSnapshot = *sourceSnapshots.Items[0]
+			if assert.NotNil(collect, sourceSnapshot.Status) {
+				assert.Equalf(collect, zfspool.SnapshotCompleted, sourceSnapshot.Status.State, "Status: %v", sourceSnapshot.Status)
+			}
+		}
+	}, maxWait, tick)
+	const sendData = `some data`
+	sourceSSHResults[fmt.Sprintf(`/usr/bin/sudo /usr/sbin/zfs send --raw --replicate %s\@%s`, someDataset, sourceSnapshot.Name)] = &ssh.TestExecResult{Stdout: []byte(sendData)}
+
+	receiveWait, receiveResume := context.WithCancel(TestEnv.Context())
+	t.Cleanup(receiveResume)
+	destination := makePool(t, "destination", run, TestPoolOptions{
+		SSHExecResults: map[string]*ssh.TestExecResult{
+			`/usr/bin/sudo /usr/sbin/zfs receive -d -s destination`: {ExpectStdin: []byte(sendData), WaitContext: receiveWait},
+		},
+	})
+
+	const someBackup = "mybackup"
+	backup := zfsbackup.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+		Spec: zfsbackup.Spec{
+			Source:      corev1.LocalObjectReference{Name: source.Name},
+			Destination: corev1.LocalObjectReference{Name: destination.Name},
+		},
+	}
+	require.NoError(t, TestEnv.Client().Create(TestEnv.Context(), &backup))
+
+	backup = zfsbackup.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+	}
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
+		assert.Equal(collect, &zfsbackup.Status{
+			State:              zfsbackup.Sending,
+			Reason:             fmt.Sprintf("sending %s@%s: sent %.1f B (0 B/s)", someDataset, sourceSnapshot.Name, float64(len(sendData))),
+			InProgressSnapshot: &corev1.LocalObjectReference{Name: sourceSnapshot.Name},
+		}, backup.Status)
+	}, zfsbackup.SendStatusUpdateInterval*2, zfsbackup.SendStatusUpdateInterval/4)
+	assert.NoError(t, testutil.GatherAndCompare(run.Metrics, strings.NewReader(fmt.Sprintf(`
+# HELP zfs_sync_backup_in_progress_snapshot_deadline The deadline for the current in progress snapshot. Deadline is represented as the number of seconds since January 1, 1970 UTC - same as the Prometheus time() function.
+# TYPE zfs_sync_backup_in_progress_snapshot_deadline gauge
+zfs_sync_backup_in_progress_snapshot_deadline{name=%q,namespace=%q} %d
+`, someBackup, run.Namespace, run.Clock.Now().Add(2*time.Hour).Unix())), "zfs_sync_backup_in_progress_snapshot_deadline"))
+	receiveResume()
+
+	backup = zfsbackup.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: someBackup, Namespace: run.Namespace},
+	}
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		assert.NoError(collect, TestEnv.Client().Get(TestEnv.Context(), client.ObjectKeyFromObject(&backup), &backup))
+		assert.Equal(collect, &zfsbackup.Status{
+			State:            zfsbackup.Ready,
+			LastSentSnapshot: &corev1.LocalObjectReference{Name: sourceSnapshot.Name},
+		}, backup.Status)
+	}, maxWait, tick)
+
+	assert.NoError(t, testutil.GatherAndCompare(run.Metrics, strings.NewReader(fmt.Sprintf(`
+# HELP zfs_sync_backup_in_progress_snapshot_deadline The deadline for the current in progress snapshot. Deadline is represented as the number of seconds since January 1, 1970 UTC - same as the Prometheus time() function.
+# TYPE zfs_sync_backup_in_progress_snapshot_deadline gauge
+zfs_sync_backup_in_progress_snapshot_deadline{name=%q,namespace=%q} 0
+`, someBackup, run.Namespace)), "zfs_sync_backup_in_progress_snapshot_deadline"))
 }

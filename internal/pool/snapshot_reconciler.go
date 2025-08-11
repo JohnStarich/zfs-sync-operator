@@ -148,7 +148,7 @@ func (r *SnapshotReconciler) reconcile(ctx context.Context, snapshot *PoolSnapsh
 		return &SnapshotStatus{State: SnapshotError, Reason: "pool is not ready"}, 0, nil
 	}
 	if pool.Status.State != Online {
-		message := string(pool.Status.State)
+		message := pool.Status.State.String()
 		if pool.Status.Reason != "" {
 			message = fmt.Sprintf("%s: %s", pool.Status.State, pool.Status.Reason)
 		}

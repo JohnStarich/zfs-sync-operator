@@ -10,12 +10,14 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/clock"
 	"github.com/johnstarich/zfs-sync-operator/internal/envtestrunner"
 	"github.com/johnstarich/zfs-sync-operator/internal/kubeassert"
+	"github.com/johnstarich/zfs-sync-operator/internal/metrics"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/operator"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
 	zfspool "github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/johnstarich/zfs-sync-operator/internal/ssh"
 	"github.com/johnstarich/zfs-sync-operator/internal/wireguard"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -80,7 +82,7 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "NotFound",
+				State:  zfspool.NotFound,
 				Reason: fmt.Sprintf(`zpool with name '%[1]s' could not be found`, somePoolName),
 			},
 		},
@@ -141,6 +143,22 @@ config:
 				expectSpec.SSH.HostKey = sshServerPublicKey
 				assert.Equal(collect, expectSpec, pool.Spec)
 			}, maxWait, tick, "namespace = %s", run.Namespace)
+
+			expectedMetrics := `
+# HELP zfs_sync_pool_state The status.state of each pool
+# TYPE zfs_sync_pool_state gauge
+`
+			for state := range zfspool.AllStates() {
+				expectedMetrics += fmt.Sprintf("zfs_sync_pool_state{name=%q,namespace=%q,state=%q} %f\n",
+					somePoolName,
+					run.Namespace,
+					state.String(),
+					metrics.CountTrue(tc.expectStatus != nil && state == tc.expectStatus.State),
+				)
+			}
+			assert.NoError(t, testutil.GatherAndCompare(run.Metrics, strings.NewReader(expectedMetrics),
+				"zfs_sync_pool_state",
+			))
 		})
 	}
 }
@@ -197,7 +215,7 @@ config:
 				},
 			},
 			expectStatus: &zfspool.Status{
-				State:  "NotFound",
+				State:  zfspool.NotFound,
 				Reason: fmt.Sprintf(`zpool with name '%[1]s' could not be found`, somePoolName),
 			},
 			expectSpecHostKey: true,

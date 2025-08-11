@@ -10,9 +10,13 @@ import (
 
 	"github.com/johnstarich/go/datasize"
 	"github.com/johnstarich/zfs-sync-operator/internal/iocount"
+	"github.com/johnstarich/zfs-sync-operator/internal/metrics"
+	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
@@ -28,7 +32,11 @@ import (
 
 // Reconciler reconciles Backup resources to validate their Pools and associated connections
 type Reconciler struct {
-	client client.Client
+	client                      client.Client
+	inProgressSnapshotDeadlines *prometheus.GaugeVec
+	sentBytes                   *prometheus.CounterVec
+	sentSnapshots               *prometheus.CounterVec
+	stateGauge                  *prometheus.GaugeVec
 }
 
 const (
@@ -36,9 +44,54 @@ const (
 	destinationProperty = ".spec.destination.name"
 )
 
+// SendStatusUpdateInterval is the time between status updates during a send
+const SendStatusUpdateInterval = 30 * time.Second
+
 // RegisterReconciler registers a Backup reconciler with manager
-func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
-	reconciler := &Reconciler{client: manager.GetClient()}
+func RegisterReconciler(ctx context.Context, manager manager.Manager, metricsRegistry prometheus.Registerer) error {
+	const (
+		backupSubsystem = "backup"
+	)
+	reconciler := &Reconciler{
+		client: manager.GetClient(),
+		inProgressSnapshotDeadlines: metrics.MustRegister(metricsRegistry, prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: name.Metrics,
+			Subsystem: backupSubsystem,
+			Name:      "in_progress_snapshot_deadline",
+			Help:      "The deadline for the current in progress snapshot. Deadline is represented as the number of seconds since January 1, 1970 UTC - same as the Prometheus time() function.",
+		}, []string{
+			metrics.NameLabel,
+			metrics.NamespaceLabel,
+		})),
+		sentBytes: metrics.MustRegister(metricsRegistry, prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: name.Metrics,
+			Subsystem: backupSubsystem,
+			Name:      "sent_bytes",
+			Help:      "The number of successfully sent bytes across all snapshots",
+		}, []string{
+			metrics.NameLabel,
+			metrics.NamespaceLabel,
+		})),
+		sentSnapshots: metrics.MustRegister(metricsRegistry, prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: name.Metrics,
+			Subsystem: backupSubsystem,
+			Name:      "sent_snapshots",
+			Help:      "The number of successfully sent snapshots",
+		}, []string{
+			metrics.NameLabel,
+			metrics.NamespaceLabel,
+		})),
+		stateGauge: metrics.MustRegister(metricsRegistry, prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: name.Metrics,
+			Subsystem: backupSubsystem,
+			Name:      "state",
+			Help:      "The status.state of each backup",
+		}, []string{
+			metrics.NameLabel,
+			metrics.NamespaceLabel,
+			metrics.StateLabel,
+		})),
+	}
 
 	ctrl, err := controller.New("backup", manager, controller.Options{
 		Reconciler: reconciler,
@@ -137,21 +190,43 @@ func RegisterReconciler(ctx context.Context, manager manager.Manager) error {
 func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("checking request", "request", request)
-	var backup Backup
-	if err := r.client.Get(ctx, request.NamespacedName, &backup); err != nil {
-		return reconcile.Result{}, err
-	}
-	logger.Info("got backup", "spec", backup.Spec, "status", backup.Status)
-	if backup.Status == nil { // guard against nil status
-		backup.Status = &Status{}
+	var backup *Backup
+	{
+		var getBackup Backup
+		if err := r.client.Get(ctx, request.NamespacedName, &getBackup); err != nil && !apierrors.IsNotFound(err) {
+			return reconcile.Result{}, err
+		} else if err == nil {
+			logger.Info("got backup", "spec", getBackup.Spec, "status", getBackup.Status)
+			if getBackup.Status == nil { // guard against nil status
+				getBackup.Status = &Status{}
+			}
+			backup = &getBackup
+		}
 	}
 
+	reconcileErr := r.reconcile(ctx, backup)
+
+	backupStateGauge := r.stateGauge.MustCurryWith(prometheus.Labels{
+		metrics.NameLabel:      request.Name,
+		metrics.NamespaceLabel: request.Namespace,
+	})
+	for state := range AllStates() {
+		backupStateGauge.With(prometheus.Labels{metrics.StateLabel: state.String()}).Set(metrics.CountTrue(backup != nil && state == backup.Status.State))
+	}
+	return reconcile.Result{}, reconcileErr
+}
+
+func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) error {
+	if backup == nil { // deleted
+		return nil
+	}
+	logger := log.FromContext(ctx)
 	var reconcileErr error
-	backup.Status.State, reconcileErr = r.reconcile(ctx, &backup)
+	backup.Status.State, reconcileErr = r.reconcileValid(ctx, backup)
 	backup.Status.Reason = ""
 
 	var returnErr error
-	if backup.Status.State == "" {
+	if backup.Status.State == UnexpectedError {
 		backup.Status.State = Error
 		returnErr = reconcileErr
 	}
@@ -161,20 +236,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	} else {
 		logger.Info("backup reconciled successfully", "status", backup.Status)
 	}
-	if err := r.client.Status().Update(ctx, &backup); err != nil {
-		return reconcile.Result{}, err
+
+	if err := r.client.Status().Update(ctx, backup); err != nil {
+		return err
 	}
-	return reconcile.Result{}, returnErr
+	return returnErr
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, error) {
+func (r *Reconciler) reconcileValid(ctx context.Context, backup *Backup) (State, error) {
 	logger := log.FromContext(ctx)
 	var source, destination pool.Pool
 	if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Source.Name}, &source); err != nil {
-		return "", errors.WithMessage(err, "get source Pool")
+		return UnexpectedError, errors.WithMessage(err, "get source Pool")
 	}
 	if err := r.client.Get(ctx, client.ObjectKey{Namespace: backup.Namespace, Name: backup.Spec.Destination.Name}, &destination); err != nil {
-		return "", errors.WithMessage(err, "get destination Pool")
+		return UnexpectedError, errors.WithMessage(err, "get destination Pool")
 	}
 
 	if err := validatePoolIsHealthy("source", source); err != nil {
@@ -183,6 +259,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, erro
 	if source.Spec == nil || source.Spec.Snapshots == nil {
 		return NotReady, errors.Errorf("source pool %q must define .spec.snapshots, either empty (the default schedule) or custom intervals", source.Name)
 	}
+
 	if err := validatePoolIsHealthy("destination", destination); err != nil {
 		return NotReady, err
 	}
@@ -196,10 +273,10 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, erro
 		Namespace: backup.Namespace,
 	})
 	if err != nil {
-		return "", err
+		return UnexpectedError, err
 	}
 	if err := pool.SortScheduledSnapshots(completedSnapshots.Items); err != nil {
-		return "", err
+		return UnexpectedError, err
 	}
 	sendSnapshots := completedSnapshots.Items
 	logger.Info("Found backup-ready snapshots", "snapshots", len(sendSnapshots))
@@ -218,6 +295,12 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, erro
 	}
 	sendLastSnapshot := sendSnapshots[len(sendSnapshots)-1]
 	logger.Info("Sending", "snapshot", sendLastSnapshot.Name)
+	if sendLastSnapshot.Spec.Deadline != nil {
+		r.inProgressSnapshotDeadlines.With(prometheus.Labels{
+			metrics.NameLabel:      backup.Name,
+			metrics.NamespaceLabel: backup.Namespace,
+		}).Set(float64(sendLastSnapshot.Spec.Deadline.Unix()))
+	}
 
 	err = source.WithConnection(ctx, r.client, func(sourceConn *pool.Connection) error {
 		return destination.WithConnection(ctx, r.client, func(destinationConn *pool.Connection) error {
@@ -225,7 +308,7 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) (State, erro
 		})
 	})
 	if err != nil {
-		return "", err
+		return UnexpectedError, err
 	}
 
 	return Ready, nil
@@ -272,9 +355,18 @@ func (r *Reconciler) sendPoolSnapshot(ctx context.Context, backup *Backup, sourc
 			return err
 		}
 	}
-	backup.Status.InProgressSnapshot = nil
-	backup.Status.LastSentSnapshot = &corev1.LocalObjectReference{Name: snapshot.Name}
-	return r.client.Status().Update(ctx, backup)
+	r.sentSnapshots.With(prometheus.Labels{
+		metrics.NameLabel:      backup.Name,
+		metrics.NamespaceLabel: backup.Namespace,
+	}).Inc()
+	r.inProgressSnapshotDeadlines.With(prometheus.Labels{
+		metrics.NameLabel:      backup.Name,
+		metrics.NamespaceLabel: backup.Namespace,
+	}).Set(0)
+	return r.updateStatus(ctx, client.ObjectKeyFromObject(backup), func(s *Status) {
+		s.InProgressSnapshot = nil
+		s.LastSentSnapshot = &corev1.LocalObjectReference{Name: snapshot.Name}
+	})
 }
 
 func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, sourcePool, destinationPool pool.Pool, sourceConn, destinationConn *pool.Connection, sourceDatasetName, snapshotName string) error {
@@ -341,16 +433,21 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 		errs <- destinationConn.ExecReadStdin(ctx, pipeReader, receiveArgs[0], receiveArgs[1:]...)
 	}()
 	go func() {
-		const statusUpdateInterval = 30 * time.Second
+		sentBytes := r.sentBytes.With(prometheus.Labels{
+			metrics.NameLabel:      backup.Name,
+			metrics.NamespaceLabel: backup.Namespace,
+		})
 		lastCount := countWriter.Count()
-		ticker := time.NewTicker(statusUpdateInterval)
+		ticker := time.NewTicker(SendStatusUpdateInterval)
 		for {
 			status := Status{
 				State: Sending,
 			}
 			newCount := countWriter.Count()
+			delta := newCount - lastCount
+			sentBytes.Add(float64(delta))
 			sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
-			rate := (newCount - lastCount) / int64(statusUpdateInterval/time.Second)
+			rate := delta / int64(SendStatusUpdateInterval/time.Second)
 			rateValue, rateUnit := datasize.Bytes(rate).FormatIEC()
 			status.Reason = fmt.Sprintf("sending %s: sent %.1f %s (%.0f %s/s)", fullSnapshotName, sentValue, sentUnit, rateValue, rateUnit)
 			if newCount > 0 {
@@ -392,10 +489,29 @@ func validatePoolIsHealthy(contextualName string, p pool.Pool) (returnedErr erro
 	case p.Status == nil:
 		return errors.New("no status available")
 	case p.Status.Reason == "":
-		return errors.New(string(p.Status.State))
+		return errors.New(p.Status.State.String())
 	default:
 		return errors.Errorf("%s: %s", p.Status.State, p.Status.Reason)
 	}
+}
+
+func (r *Reconciler) updateStatus(ctx context.Context, key client.ObjectKey, update func(*Status)) error {
+	logger := log.FromContext(ctx)
+	const maxAttempts = 3
+	var err error
+	for attempt := range maxAttempts {
+		var backup Backup
+		err = r.client.Get(ctx, key, &backup)
+		if err == nil {
+			update(backup.Status)
+			err = r.client.Status().Update(ctx, &backup)
+			if err == nil {
+				return nil
+			}
+		}
+		logger.Info("Failed to update status", "attempt", attempt, "err", err)
+	}
+	return err
 }
 
 func (r *Reconciler) patchStatus(ctx context.Context, namespace, name string, status Status) error {
