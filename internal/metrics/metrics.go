@@ -5,8 +5,8 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // Common metric labels
 const (
-	NamespaceLabel = "namespace"
-	NameLabel      = "name"
+	NamespaceLabel = "resource_namespace"
+	NameLabel      = "resource_name"
 	StateLabel     = "state"
 )
 
