@@ -213,23 +213,25 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) error {
 		return nil
 	}
 	logger := log.FromContext(ctx)
-	var reconcileErr error
-	backup.Status.State, reconcileErr = r.reconcileValid(ctx, backup)
-	backup.Status.Reason = ""
+	state, reconcileErr := r.reconcileValid(ctx, backup)
 
+	var reason string
 	var returnErr error
-	if backup.Status.State == UnexpectedError {
-		backup.Status.State = Error
+	if state == UnexpectedError {
+		state = Error
 		returnErr = reconcileErr
 	}
 	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
-		backup.Status.Reason = reconcileErr.Error()
+		reason = reconcileErr.Error()
 	} else {
 		logger.Info("backup reconciled successfully", "status", backup.Status)
 	}
 
-	if err := r.patchStatus(ctx, client.ObjectKeyFromObject(backup), *backup.Status); err != nil {
+	if err := r.patchStatus(ctx, client.ObjectKeyFromObject(backup), Status{
+		State:  state,
+		Reason: reason,
+	}); err != nil {
 		return err
 	}
 	return returnErr
