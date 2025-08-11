@@ -205,14 +205,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	}
 
 	reconcileErr := r.reconcile(ctx, backup)
-
-	backupStateGauge := r.stateGauge.MustCurryWith(prometheus.Labels{
-		metrics.NameLabel:      request.Name,
-		metrics.NamespaceLabel: request.Namespace,
-	})
-	for state := range AllStates() {
-		backupStateGauge.With(prometheus.Labels{metrics.StateLabel: state.String()}).Set(metrics.CountTrue(backup != nil && state == backup.Status.State))
-	}
 	return reconcile.Result{}, reconcileErr
 }
 
@@ -221,23 +213,25 @@ func (r *Reconciler) reconcile(ctx context.Context, backup *Backup) error {
 		return nil
 	}
 	logger := log.FromContext(ctx)
-	var reconcileErr error
-	backup.Status.State, reconcileErr = r.reconcileValid(ctx, backup)
-	backup.Status.Reason = ""
+	state, reconcileErr := r.reconcileValid(ctx, backup)
 
+	var reason string
 	var returnErr error
-	if backup.Status.State == UnexpectedError {
-		backup.Status.State = Error
+	if state == UnexpectedError {
+		state = Error
 		returnErr = reconcileErr
 	}
 	if reconcileErr != nil {
 		logger.Error(reconcileErr, "reconcile failed")
-		backup.Status.Reason = reconcileErr.Error()
+		reason = reconcileErr.Error()
 	} else {
 		logger.Info("backup reconciled successfully", "status", backup.Status)
 	}
 
-	if err := r.client.Status().Update(ctx, backup); err != nil {
+	if err := r.patchStatus(ctx, client.ObjectKeyFromObject(backup), Status{
+		State:  state,
+		Reason: reason,
+	}); err != nil {
 		return err
 	}
 	return returnErr
@@ -455,7 +449,7 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 			}
 
 			lastCount = newCount
-			if err := r.patchStatus(ctx, backup.Namespace, backup.Name, status); err != nil {
+			if err := r.patchStatus(ctx, client.ObjectKeyFromObject(backup), status); err != nil {
 				logger.Error(err, "Failed to patch status for Sending")
 			}
 			select {
@@ -504,6 +498,7 @@ func (r *Reconciler) updateStatus(ctx context.Context, key client.ObjectKey, upd
 		err = r.client.Get(ctx, key, &backup)
 		if err == nil {
 			update(backup.Status)
+			r.observeState(key, backup.Status.State)
 			err = r.client.Status().Update(ctx, &backup)
 			if err == nil {
 				return nil
@@ -514,9 +509,20 @@ func (r *Reconciler) updateStatus(ctx context.Context, key client.ObjectKey, upd
 	return err
 }
 
-func (r *Reconciler) patchStatus(ctx context.Context, namespace, name string, status Status) error {
+func (r *Reconciler) patchStatus(ctx context.Context, key client.ObjectKey, status Status) error {
+	r.observeState(key, status.State)
 	return r.client.Status().Patch(ctx, &Backup{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
+		ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name},
 		Status:     &status,
 	}, client.Merge)
+}
+
+func (r *Reconciler) observeState(key client.ObjectKey, state State) {
+	backupStateGauge := r.stateGauge.MustCurryWith(prometheus.Labels{
+		metrics.NameLabel:      key.Name,
+		metrics.NamespaceLabel: key.Namespace,
+	})
+	for s := range AllStates() {
+		backupStateGauge.With(prometheus.Labels{metrics.StateLabel: s.String()}).Set(metrics.CountTrue(s == state))
+	}
 }
