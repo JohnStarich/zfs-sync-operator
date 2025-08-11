@@ -149,7 +149,7 @@ config:
 # TYPE zfs_sync_pool_state gauge
 `
 			for state := range zfspool.AllStates() {
-				expectedMetrics += fmt.Sprintf("zfs_sync_pool_state{name=%q,namespace=%q,state=%q} %f\n",
+				expectedMetrics += fmt.Sprintf("zfs_sync_pool_state{resource_name=%q,resource_namespace=%q,state=%q} %f\n",
 					somePoolName,
 					run.Namespace,
 					state.String(),

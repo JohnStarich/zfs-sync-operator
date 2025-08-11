@@ -121,7 +121,7 @@ func TestBackupReady(t *testing.T) {
 # TYPE zfs_sync_backup_state gauge
 `
 			for state := range zfsbackup.AllStates() {
-				expectedMetrics += fmt.Sprintf("zfs_sync_backup_state{name=%q,namespace=%q,state=%q} %f\n",
+				expectedMetrics += fmt.Sprintf("zfs_sync_backup_state{resource_name=%q,resource_namespace=%q,state=%q} %f\n",
 					someBackupName,
 					run.Namespace,
 					state.String(),
@@ -328,7 +328,7 @@ func TestBackupSendAndReceive(t *testing.T) {
 			expectedMetrics := fmt.Sprintf(`
 # HELP zfs_sync_backup_sent_snapshots The number of successfully sent snapshots
 # TYPE zfs_sync_backup_sent_snapshots counter
-zfs_sync_backup_sent_snapshots{name=%q,namespace=%q} %d
+zfs_sync_backup_sent_snapshots{resource_name=%q,resource_namespace=%q} %d
 `, someBackup, run.Namespace, sentSnapshots)
 			compareErr = testutil.GatherAndCompare(run.Metrics, strings.NewReader(expectedMetrics), "zfs_sync_backup_sent_snapshots")
 			if compareErr == nil {
@@ -724,7 +724,7 @@ func TestBackupSendingStateAndMetrics(t *testing.T) {
 	assert.NoError(t, testutil.GatherAndCompare(run.Metrics, strings.NewReader(fmt.Sprintf(`
 # HELP zfs_sync_backup_in_progress_snapshot_deadline The deadline for the current in progress snapshot. Deadline is represented as the number of seconds since January 1, 1970 UTC - same as the Prometheus time() function.
 # TYPE zfs_sync_backup_in_progress_snapshot_deadline gauge
-zfs_sync_backup_in_progress_snapshot_deadline{name=%q,namespace=%q} %d
+zfs_sync_backup_in_progress_snapshot_deadline{resource_name=%q,resource_namespace=%q} %d
 `, someBackup, run.Namespace, run.Clock.Now().Add(2*time.Hour).Unix())), "zfs_sync_backup_in_progress_snapshot_deadline"))
 	receiveResume()
 
@@ -742,6 +742,6 @@ zfs_sync_backup_in_progress_snapshot_deadline{name=%q,namespace=%q} %d
 	assert.NoError(t, testutil.GatherAndCompare(run.Metrics, strings.NewReader(fmt.Sprintf(`
 # HELP zfs_sync_backup_in_progress_snapshot_deadline The deadline for the current in progress snapshot. Deadline is represented as the number of seconds since January 1, 1970 UTC - same as the Prometheus time() function.
 # TYPE zfs_sync_backup_in_progress_snapshot_deadline gauge
-zfs_sync_backup_in_progress_snapshot_deadline{name=%q,namespace=%q} 0
+zfs_sync_backup_in_progress_snapshot_deadline{resource_name=%q,resource_namespace=%q} 0
 `, someBackup, run.Namespace)), "zfs_sync_backup_in_progress_snapshot_deadline"))
 }
