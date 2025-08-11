@@ -523,6 +523,6 @@ func (r *Reconciler) observeState(key client.ObjectKey, state State) {
 		metrics.NamespaceLabel: key.Namespace,
 	})
 	for s := range AllStates() {
-		backupStateGauge.With(prometheus.Labels{metrics.StateLabel: state.String()}).Set(metrics.CountTrue(s == state))
+		backupStateGauge.With(prometheus.Labels{metrics.StateLabel: s.String()}).Set(metrics.CountTrue(s == state))
 	}
 }
