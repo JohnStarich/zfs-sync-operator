@@ -43,9 +43,11 @@ const nicID = 1
 // Useful for avoiding kernel module privilege requirements to manage TUN devices, like with WireGuard.
 func New(localAddresses []netip.Addr, maxTransmissionUnit uint32) (*Net, error) {
 	opts := stack.Options{
-		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
-		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol},
-		HandleLocal:        true,
+		NetworkProtocols: []stack.NetworkProtocolFactory{ipv4.NewProtocol, ipv6.NewProtocol},
+		TransportProtocols: []stack.TransportProtocolFactory{
+			tcp.NewProtocolCUBIC, // Use cubic to less aggressively increase traffic and avoid overwhelming the link. https://github.com/google/gvisor/pull/10287
+		},
+		HandleLocal: true,
 	}
 	const channelEndpointSize = 1 << 10
 	net := &Net{
