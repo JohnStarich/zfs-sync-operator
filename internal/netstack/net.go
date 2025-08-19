@@ -59,6 +59,7 @@ func New(localAddresses []netip.Addr, maxTransmissionUnit uint32) (*Net, error) 
 	}
 	for _, option := range []tcpip.SettableTransportProtocolOption{
 		pointer.Of(tcpip.TCPSACKEnabled(true)),
+		pointer.Of(tcpip.TCPRecovery(0)), // Disable recovery to save some CPU cycles in userspace, defer to kernel and network level recovery.
 	} {
 		if err := net.stack.SetTransportProtocolOption(tcp.ProtocolNumber, option); err != nil {
 			return nil, errors.Errorf("failed to set TCP transport option %v: %v", option, err)
