@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	goerrors "errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -460,15 +461,29 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 
 	for range maxExpectedErrors {
 		select {
-		case err := <-errs:
-			if err != nil {
-				return err
+		case firstErr := <-errs:
+			if firstErr != nil {
+				// if available, include all remaining errors as context
+				allReadyErrors := append([]error{firstErr}, readAllReadyData(errs)...)
+				return goerrors.Join(allReadyErrors...)
 			}
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
 	return nil
+}
+
+func readAllReadyData[Value any](c <-chan Value) []Value {
+	var ready []Value
+	for {
+		select {
+		case value := <-c:
+			ready = append(ready, value)
+		default:
+			return ready
+		}
+	}
 }
 
 func validatePoolIsHealthy(contextualName string, p pool.Pool) (returnedErr error) {
