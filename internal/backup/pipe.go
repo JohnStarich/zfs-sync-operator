@@ -7,12 +7,18 @@ import (
 	"github.com/johnstarich/zfs-sync-operator/internal/iocount"
 )
 
+// pipe is a readable/writable/closable unbuffered pipe that fails with [io.ErrUnexpectedEOF]
+// when idleTimeout elapses during a Read or Write.
+//
+// The pipe and all connected parts must be thrown away immediately when this error is returned
+// to avoid undefined behavior from retaining the read/write buffer.
 type pipe struct {
 	io.Reader
 	*iocount.Writer
 	idleTimeout time.Duration
 }
 
+// newPipe returns a new [pipe]
 func newPipe(idleTimeout time.Duration) *pipe {
 	r, w := io.Pipe()
 	countWriter := iocount.NewWriter(w)
