@@ -83,12 +83,11 @@ func TestPipeIdleTimeout(t *testing.T) {
 
 				n, err := pipe.Read(makeByteArray())
 				assert.Zero(t, n)
-				assert.Error(t, err)
-				assert.NotEqual(t, io.EOF, err)
+				assert.Equal(t, io.EOF, err, "Read should hit EOF after close, since the paired writer is the source; the pipe isn't relevant to the reader")
 				n, err = pipe.Write(makeByteArray())
 				assert.Zero(t, n)
 				assert.Error(t, err)
-				assert.NotEqual(t, io.EOF, err)
+				assert.NotEqual(t, io.EOF, err, "Write should not hit EOF after close, it should return the idle timeout error")
 			}
 		})
 	}
