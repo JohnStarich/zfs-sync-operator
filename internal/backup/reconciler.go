@@ -478,7 +478,10 @@ func readAllReadyData[Value any](c <-chan Value) []Value {
 	var ready []Value
 	for {
 		select {
-		case value := <-c:
+		case value, ok := <-c:
+			if !ok {
+				return ready
+			}
 			ready = append(ready, value)
 		default:
 			return ready
