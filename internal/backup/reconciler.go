@@ -416,7 +416,7 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 
 	const maxExpectedErrors = 2
 	errs := make(chan error, maxExpectedErrors)
-	const idleTimeout = 5 * time.Second
+	const idleTimeout = 30 * time.Second
 	pipe := newPipe(idleTimeout)
 	go func() {
 		errs <- sourceConn.ExecWriteStdout(ctx, pipe, sendArgs[0], sendArgs[1:]...)
