@@ -23,20 +23,28 @@ func newPipe(idleTimeout time.Duration) *pipe {
 	}
 }
 
-type readResult struct {
+type ioResult struct {
 	N   int
 	Err error
 }
 
 func (p *pipe) Read(b []byte) (int, error) {
-	results := make(chan readResult)
+	return p.doWithIdleTimeout(p.Reader.Read, b)
+}
+
+func (p *pipe) Write(b []byte) (int, error) {
+	return p.doWithIdleTimeout(p.Writer.Write, b)
+}
+
+func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int, error) {
+	results := make(chan ioResult)
 	go func() {
-		// NOTE: This is not ideal. Reading into 'b' after the caller returns has undefined behavior.
+		// NOTE: This is not ideal. Operating on 'b' after the caller returns violates the io.Reader/io.Writer interface contract.
 		//
 		// We're making assumptions here to keep client code as simple as possible.
 		// Specifically, we're constraining this to "stuck" scenarios and expecting the buffers to all be thrown away immediately when we time out.
-		n, err := p.Reader.Read(b)
-		results <- readResult{N: n, Err: err}
+		n, err := doIO(b)
+		results <- ioResult{N: n, Err: err}
 	}()
 	select {
 	case result := <-results:
