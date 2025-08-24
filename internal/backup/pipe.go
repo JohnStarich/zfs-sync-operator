@@ -50,11 +50,6 @@ func (p *pipe) Write(b []byte) (int, error) {
 }
 
 func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int, error) {
-	select {
-	case <-p.ctx.Done():
-		return 0, context.Cause(p.ctx)
-	default:
-	}
 	results := make(chan ioResult)
 	go func() {
 		// NOTE: This is not ideal. Operating on 'b' after the caller returns violates the io.Reader/io.Writer interface contract.
@@ -65,21 +60,28 @@ func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int,
 		results <- ioResult{N: n, Err: err}
 	}()
 	select {
-	case <-p.ctx.Done():
-		return 0, context.Cause(p.ctx)
 	case result := <-results:
 		return result.N, result.Err
 	case <-time.After(p.idleTimeout):
 		err := io.ErrUnexpectedEOF
+		p.done(err)
 		if closeErr := p.Close(); closeErr != nil {
 			err = errors.Join(err, closeErr)
 		}
-		p.done(err)
 		return 0, err
 	}
 }
 
+func (p *pipe) Close() error {
+	defer p.done(nil)
+	return p.Writer.Close()
+}
+
 func (p *pipe) Wait() error {
 	<-p.ctx.Done()
-	return context.Cause(p.ctx)
+	err := context.Cause(p.ctx)
+	if err != context.Canceled {
+		return err
+	}
+	return nil
 }
