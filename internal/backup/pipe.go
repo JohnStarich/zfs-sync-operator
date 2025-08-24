@@ -1,9 +1,9 @@
 package backup
 
 import (
+	"context"
 	"errors"
 	"io"
-	"sync/atomic"
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/iocount"
@@ -18,17 +18,21 @@ type pipe struct {
 	io.Reader
 	*iocount.Writer
 	idleTimeout time.Duration
-	closed      atomic.Bool
+	ctx         context.Context
+	done        context.CancelCauseFunc
 }
 
 // newPipe returns a new [pipe]
 func newPipe(idleTimeout time.Duration) *pipe {
 	r, w := io.Pipe()
 	countWriter := iocount.NewWriter(w)
+	ctx, done := context.WithCancelCause(context.Background())
 	return &pipe{
 		Reader:      r,
 		Writer:      countWriter,
 		idleTimeout: idleTimeout,
+		ctx:         ctx,
+		done:        done,
 	}
 }
 
@@ -46,9 +50,6 @@ func (p *pipe) Write(b []byte) (int, error) {
 }
 
 func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int, error) {
-	if p.closed.Load() {
-		return 0, io.ErrUnexpectedEOF
-	}
 	results := make(chan ioResult)
 	go func() {
 		// NOTE: This is not ideal. Operating on 'b' after the caller returns violates the io.Reader/io.Writer interface contract.
@@ -63,11 +64,24 @@ func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int,
 		return result.N, result.Err
 	case <-time.After(p.idleTimeout):
 		err := io.ErrUnexpectedEOF
-		if p.closed.CompareAndSwap(false, true) {
-			if closeErr := p.Close(); closeErr != nil {
-				err = errors.Join(err, closeErr)
-			}
+		p.done(err)
+		if closeErr := p.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
 		}
 		return 0, err
 	}
+}
+
+func (p *pipe) Close() error {
+	defer p.done(nil)
+	return p.Writer.Close()
+}
+
+func (p *pipe) Wait() error {
+	<-p.ctx.Done()
+	err := context.Cause(p.ctx)
+	if err != context.Canceled {
+		return err
+	}
+	return nil
 }

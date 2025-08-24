@@ -415,10 +415,13 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 	}
 	logger.Info("Syncing", "sendCommand", sendArgs, "receiveCommand", receiveArgs)
 
-	const maxExpectedErrors = 2
+	const maxExpectedErrors = 3
 	errs := make(chan error, maxExpectedErrors)
 	const idleTimeout = 30 * time.Second
 	pipe := newPipe(idleTimeout)
+	go func() {
+		errs <- pipe.Wait()
+	}()
 	go func() {
 		errs <- sourceConn.ExecWriteStdout(ctx, pipe, sendArgs[0], sendArgs[1:]...)
 	}()
