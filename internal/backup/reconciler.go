@@ -3,13 +3,11 @@ package backup
 import (
 	"context"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/johnstarich/go/datasize"
-	"github.com/johnstarich/zfs-sync-operator/internal/iocount"
 	"github.com/johnstarich/zfs-sync-operator/internal/metrics"
 	"github.com/johnstarich/zfs-sync-operator/internal/name"
 	"github.com/johnstarich/zfs-sync-operator/internal/pool"
@@ -418,26 +416,26 @@ func (r *Reconciler) sendDatasetSnapshot(ctx context.Context, backup *Backup, so
 
 	const maxExpectedErrors = 2
 	errs := make(chan error, maxExpectedErrors)
-	pipeReader, pipeWriter := io.Pipe()
-	countWriter := iocount.NewWriter(pipeWriter)
+	const idleTimeout = 5 * time.Second
+	pipe := newPipe(idleTimeout)
 	go func() {
-		errs <- sourceConn.ExecWriteStdout(ctx, countWriter, sendArgs[0], sendArgs[1:]...)
+		errs <- sourceConn.ExecWriteStdout(ctx, pipe, sendArgs[0], sendArgs[1:]...)
 	}()
 	go func() {
-		errs <- destinationConn.ExecReadStdin(ctx, pipeReader, receiveArgs[0], receiveArgs[1:]...)
+		errs <- destinationConn.ExecReadStdin(ctx, pipe, receiveArgs[0], receiveArgs[1:]...)
 	}()
 	go func() {
 		sentBytes := r.sentBytes.With(prometheus.Labels{
 			metrics.NameLabel:      backup.Name,
 			metrics.NamespaceLabel: backup.Namespace,
 		})
-		lastCount := countWriter.Count()
+		lastCount := pipe.Count()
 		ticker := time.NewTicker(SendStatusUpdateInterval)
 		for {
 			status := Status{
 				State: Sending,
 			}
-			newCount := countWriter.Count()
+			newCount := pipe.Count()
 			delta := newCount - lastCount
 			sentBytes.Add(float64(delta))
 			sentValue, sentUnit := datasize.Bytes(newCount).FormatIEC()
