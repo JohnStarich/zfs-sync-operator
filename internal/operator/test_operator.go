@@ -65,7 +65,7 @@ func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestR
 	tb.Helper()
 	if testing.Short() {
 		tb.Skip("Short requested. Skipping longer operator reconcile tests.")
-		return
+		return TestRunConfig{}
 	}
 
 	ctx, cancel := context.WithCancel(testEnv.Context())
