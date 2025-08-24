@@ -22,6 +22,7 @@ type fullIOResult struct {
 }
 
 func TestPipeReadWrite(t *testing.T) {
+	t.Parallel()
 	const idleTimeout = 1 * time.Second
 	pipe := newPipe(idleTimeout)
 	const someData = "some data"
