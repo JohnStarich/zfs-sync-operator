@@ -37,10 +37,7 @@ import (
 //		...
 //	}
 func RunTestMain(m *testing.M, storeTestEnv **envtestrunner.Runner) {
-	flag.Parse()
-	if testing.Short() {
-		return
-	}
+	flag.Parse() // allow testing.Short() to work
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	testEnv := envtestrunner.New(ctx, m.Run, mustNewScheme())
@@ -66,6 +63,11 @@ type TestRunConfig struct {
 // RunTest sets up an [Operator] and a namespace to create resources in. Uses the existing global [envtestrunner.Runner] set up from a [RunTestMain].
 func RunTest(tb testing.TB, testEnv *envtestrunner.Runner) (returnedConfig TestRunConfig) {
 	tb.Helper()
+	if testing.Short() {
+		tb.Skip("Short requested. Skipping longer operator reconcile tests.")
+		return
+	}
+
 	ctx, cancel := context.WithCancel(testEnv.Context())
 	shutdownCtx, shutdownComplete := context.WithCancel(context.Background())
 	tb.Cleanup(func() {
