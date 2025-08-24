@@ -1,9 +1,9 @@
 package backup
 
 import (
+	"context"
 	"errors"
 	"io"
-	"sync/atomic"
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/iocount"
@@ -18,17 +18,21 @@ type pipe struct {
 	io.Reader
 	*iocount.Writer
 	idleTimeout time.Duration
-	closed      atomic.Bool
+	ctx         context.Context
+	done        context.CancelCauseFunc
 }
 
 // newPipe returns a new [pipe]
 func newPipe(idleTimeout time.Duration) *pipe {
 	r, w := io.Pipe()
 	countWriter := iocount.NewWriter(w)
+	ctx, done := context.WithCancelCause(context.Background())
 	return &pipe{
 		Reader:      r,
 		Writer:      countWriter,
 		idleTimeout: idleTimeout,
+		ctx:         ctx,
+		done:        done,
 	}
 }
 
@@ -46,8 +50,10 @@ func (p *pipe) Write(b []byte) (int, error) {
 }
 
 func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int, error) {
-	if p.closed.Load() {
-		return 0, io.ErrUnexpectedEOF
+	select {
+	case <-p.ctx.Done():
+		return 0, context.Cause(p.ctx)
+	default:
 	}
 	results := make(chan ioResult)
 	go func() {
@@ -59,15 +65,21 @@ func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int,
 		results <- ioResult{N: n, Err: err}
 	}()
 	select {
+	case <-p.ctx.Done():
+		return 0, context.Cause(p.ctx)
 	case result := <-results:
 		return result.N, result.Err
 	case <-time.After(p.idleTimeout):
 		err := io.ErrUnexpectedEOF
-		if p.closed.CompareAndSwap(false, true) {
-			if closeErr := p.Close(); closeErr != nil {
-				err = errors.Join(err, closeErr)
-			}
+		if closeErr := p.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
 		}
+		p.done(err)
 		return 0, err
 	}
+}
+
+func (p *pipe) Wait() error {
+	<-p.ctx.Done()
+	return context.Cause(p.ctx)
 }

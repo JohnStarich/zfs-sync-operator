@@ -75,7 +75,11 @@ func TestPipeIdleTimeout(t *testing.T) {
 				assert.Equal(t, io.ErrUnexpectedEOF, result.Err)
 				assert.Equal(t, makeByteArray(), result.Data)
 				assert.Zero(t, result.N)
-				assert.True(t, pipe.closed.Load())
+				select {
+				case <-pipe.ctx.Done():
+				default:
+					t.Error("pipe not closed after idle")
+				}
 
 				n, err := pipe.Read(makeByteArray())
 				assert.Zero(t, n)
