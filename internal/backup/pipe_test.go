@@ -75,6 +75,16 @@ func TestPipeIdleTimeout(t *testing.T) {
 				assert.Equal(t, io.ErrUnexpectedEOF, result.Err)
 				assert.Equal(t, makeByteArray(), result.Data)
 				assert.Zero(t, result.N)
+				assert.True(t, pipe.closed.Load())
+
+				n, err := pipe.Read(makeByteArray())
+				assert.Zero(t, n)
+				assert.Error(t, err)
+				assert.NotEqual(t, io.EOF, err)
+				n, err = pipe.Write(makeByteArray())
+				assert.Zero(t, n)
+				assert.Error(t, err)
+				assert.NotEqual(t, io.EOF, err)
 			}
 		})
 	}

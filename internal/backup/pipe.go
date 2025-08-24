@@ -2,6 +2,7 @@ package backup
 
 import (
 	"io"
+	"sync/atomic"
 	"time"
 
 	"github.com/johnstarich/zfs-sync-operator/internal/iocount"
@@ -16,6 +17,7 @@ type pipe struct {
 	io.Reader
 	*iocount.Writer
 	idleTimeout time.Duration
+	closed      atomic.Bool
 }
 
 // newPipe returns a new [pipe]
@@ -43,6 +45,9 @@ func (p *pipe) Write(b []byte) (int, error) {
 }
 
 func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int, error) {
+	if p.closed.Load() {
+		return 0, io.ErrUnexpectedEOF
+	}
 	results := make(chan ioResult)
 	go func() {
 		// NOTE: This is not ideal. Operating on 'b' after the caller returns violates the io.Reader/io.Writer interface contract.
@@ -56,6 +61,9 @@ func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int,
 	case result := <-results:
 		return result.N, result.Err
 	case <-time.After(p.idleTimeout):
+		if p.closed.CompareAndSwap(false, true) {
+			p.Close()
+		}
 		return 0, io.ErrUnexpectedEOF
 	}
 }
