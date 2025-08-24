@@ -2,6 +2,17 @@ apiVersion: v1
 entries:
   zfs-sync-operator:
   - apiVersion: v2
+    created: "2025-08-24T06:30:13.395951971Z"
+    description: Sync ZFS backups to an offsite location natively in Kubernetes.
+    digest: 279671153d46d9c4cb2258fe9f5016c3a599a6011f1413c6314830647a17a2ae
+    name: zfs-sync-operator
+    sources:
+    - https://github.com/johnstarich/zfs-sync-operator
+    type: application
+    urls:
+    - https://github.com/JohnStarich/zfs-sync-operator/releases/download/zfs-sync-operator-0.1.12/zfs-sync-operator-0.1.12.tgz
+    version: 0.1.12
+  - apiVersion: v2
     created: "2025-08-24T05:57:24.691941462Z"
     description: Sync ZFS backups to an offsite location natively in Kubernetes.
     digest: 627dae93cf000458b30b883d829565476985908f28443a2129a1f8ca97e29a1b
@@ -133,4 +144,4 @@ entries:
     urls:
     - https://github.com/JohnStarich/zfs-sync-operator/releases/download/zfs-sync-operator-0.1.0/zfs-sync-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2025-08-24T05:57:24.691991426Z"
+generated: "2025-08-24T06:30:13.396063569Z"
