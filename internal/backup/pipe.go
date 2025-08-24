@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"errors"
 	"io"
 	"sync/atomic"
 	"time"
@@ -61,9 +62,12 @@ func (p *pipe) doWithIdleTimeout(doIO func([]byte) (int, error), b []byte) (int,
 	case result := <-results:
 		return result.N, result.Err
 	case <-time.After(p.idleTimeout):
+		err := io.ErrUnexpectedEOF
 		if p.closed.CompareAndSwap(false, true) {
-			p.Close()
+			if closeErr := p.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
 		}
-		return 0, io.ErrUnexpectedEOF
+		return 0, err
 	}
 }
