@@ -8,6 +8,7 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/johnstarich/zfs-sync-operator/internal/pointer"
@@ -154,7 +155,8 @@ func (p *Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) 
 			}
 		}
 
-		wireGuardNet, err := wireguard.Start(ctx, wireguard.Config{
+		const shutdownTimeout = 5 * time.Second
+		wireGuardNet, err := wireguard.Start(shutdownContext(ctx, shutdownTimeout), wireguard.Config{
 			LocalAddress:    wireGuardSpec.LocalAddress,
 			LocalPrivateKey: localPrivateKey,
 			LogHandler:      logr.ToSlogHandler(logger),
@@ -171,6 +173,19 @@ func (p *Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) 
 
 	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress)
 	return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
+}
+
+func shutdownContext(ctx context.Context, shutdownTimeout time.Duration) context.Context {
+	shutdownCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	go func() {
+		defer cancel()
+		<-ctx.Done()
+		select {
+		case <-shutdownCtx.Done():
+		case <-time.After(shutdownTimeout):
+		}
+	}()
+	return shutdownCtx
 }
 
 // ExecCombinedOutput executes the named command with its arguments, captures the output, and returns the results
