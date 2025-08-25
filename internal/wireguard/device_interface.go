@@ -31,7 +31,18 @@ func newInterface(logger *slog.Logger, localAddress netip.Addr) *DeviceInterface
 // Start starts and runs the interface until the context is canceled.
 // Use [Wait] to view any errors encountered while running.
 func (i *DeviceInterface) Start(ctx context.Context) (*wgdevice.Device, *netstack.Net, error) {
-	tunNet, err := netstack.New([]netip.Addr{i.localAddress}, wgdevice.DefaultMTU)
+	const (
+		defaultMTU        = 1500
+		wireguardOverhead = defaultMTU - wgdevice.DefaultMTU
+		// OKD and OpenShift can use OVN-Kubernetes for cluster networking, which has a sizable overhead.
+		// Carve that out for everyone with this, but this could probably be discoverable or configurable in the future.
+		// https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/advanced_networking/changing-cluster-network-mtu#mtu-value-selection_changing-cluster-network-mtu
+		ovnKubernetesOverhead = 100
+
+		// effective max transmission unit (MTU) should be after discounting the overhead of every layer in the software network stack
+		mtu = defaultMTU - wireguardOverhead - ovnKubernetesOverhead
+	)
+	tunNet, err := netstack.New([]netip.Addr{i.localAddress}, mtu)
 	if err != nil {
 		return nil, nil, err
 	}
