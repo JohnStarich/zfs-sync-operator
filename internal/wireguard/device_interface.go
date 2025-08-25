@@ -38,8 +38,11 @@ func (i *DeviceInterface) Start(ctx context.Context) (*wgdevice.Device, *netstac
 		// Carve that out for everyone with this, but this could probably be discoverable or configurable in the future.
 		// https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/advanced_networking/changing-cluster-network-mtu#mtu-value-selection_changing-cluster-network-mtu
 		ovnKubernetesOverhead = 100
+
+		// effective max transmission unit (MTU) should be after discounting the overhead of every layer in the software network stack
+		mtu = defaultMTU - wireguardOverhead - ovnKubernetesOverhead
 	)
-	tunNet, err := netstack.New([]netip.Addr{i.localAddress}, defaultMTU-wireguardOverhead-ovnKubernetesOverhead)
+	tunNet, err := netstack.New([]netip.Addr{i.localAddress}, mtu)
 	if err != nil {
 		return nil, nil, err
 	}
