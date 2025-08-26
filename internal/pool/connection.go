@@ -171,7 +171,10 @@ func (p *Pool) dialSSHConnection(ctx context.Context, client ctrlclient.Client) 
 		ipNet = wireGuardNet
 	}
 
-	conn, err := ipNet.DialContext(ctx, "tcp", sshAddress)
+	const connectTimeout = 10 * time.Second // Arbitrary upper bound connect timeout to prevent indefinite hangs
+	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	conn, err := ipNet.DialContext(dialCtx, "tcp", sshAddress)
 	return conn, errors.WithMessagef(err, "dial SSH server %s", sshAddress)
 }
 
