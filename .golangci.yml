@@ -17,3 +17,6 @@ linters:
     - revive
     - unconvert
     - unparam
+  settings:
+    goconst:
+      min-occurrences: 10
