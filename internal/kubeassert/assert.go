@@ -73,7 +73,7 @@ func assertableResourceFromObject[Object client.Object](object Object) resource 
 		return resource{}
 	}
 	value := reflect.ValueOf(object)
-	if value.Kind() == reflect.Ptr {
+	if value.Kind() == reflect.Pointer {
 		value = value.Elem()
 	}
 	var name string
@@ -91,10 +91,10 @@ func assertableResourceFromObject[Object client.Object](object Object) resource 
 			Finalizers:      object.GetFinalizers(),
 		},
 	}
-	if v := value.FieldByName("Spec"); v.Kind() != reflect.Ptr || !v.IsNil() {
+	if v := value.FieldByName("Spec"); v.Kind() != reflect.Pointer || !v.IsNil() {
 		r.Spec = v.Interface()
 	}
-	if v := value.FieldByName("Status"); v.Kind() != reflect.Ptr || !v.IsNil() {
+	if v := value.FieldByName("Status"); v.Kind() != reflect.Pointer || !v.IsNil() {
 		r.Status = v.Interface()
 	}
 	return r

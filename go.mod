@@ -1,6 +1,6 @@
 module github.com/johnstarich/zfs-sync-operator
 
-go 1.23.1
+go 1.24.13
 
 toolchain go1.27.2
 

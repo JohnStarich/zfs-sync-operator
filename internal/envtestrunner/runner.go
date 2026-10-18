@@ -84,7 +84,7 @@ func (e exitError) Error() string {
 }
 
 func runCommand(ctx context.Context, errOut io.Writer, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // G204: Each instance of runCommand use consts for all name and args parameters.
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = errOut
