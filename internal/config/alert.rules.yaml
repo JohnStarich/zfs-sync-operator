@@ -10,6 +10,7 @@ spec:
         - alert: ZFSPoolUnhealthy
           expr: zfs_sync_pool_state{state!~"Online"} > 0
           for: 5m
+          keep_firing_for: 1h
           labels:
             severity: critical
           annotations:
@@ -20,6 +21,7 @@ spec:
         - alert: ZFSBackupUnhealthy
           expr: zfs_sync_backup_state{state!~"Ready|Sending"} > 0
           for: 5m
+          keep_firing_for: 1h
           labels:
             severity: critical
           annotations:
