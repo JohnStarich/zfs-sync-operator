@@ -264,7 +264,7 @@ func TestBackupSendAndReceive(t *testing.T) {
 	})
 	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 		Intervals: []zfspool.SnapshotIntervalSpec{
-			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+			{Name: zfspool.HourlyInterval, Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
 		},
 		Template: zfspool.SnapshotSpecTemplate{
 			Datasets: []zfspool.DatasetSelector{
@@ -360,7 +360,7 @@ func TestBackupSendAndReceiveIncremental(t *testing.T) {
 	})
 	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 		Intervals: []zfspool.SnapshotIntervalSpec{
-			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+			{Name: zfspool.HourlyInterval, Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
 		},
 		Template: zfspool.SnapshotSpecTemplate{
 			Datasets: []zfspool.DatasetSelector{{Name: someDataset, Recursive: &zfspool.RecursiveDatasetSpec{}}},
@@ -461,7 +461,7 @@ func TestBackupResumeSendAndReceive(t *testing.T) {
 	})
 	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 		Intervals: []zfspool.SnapshotIntervalSpec{
-			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+			{Name: zfspool.HourlyInterval, Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
 		},
 		Template: zfspool.SnapshotSpecTemplate{
 			Datasets: []zfspool.DatasetSelector{{Name: someSourceDataset, Recursive: &zfspool.RecursiveDatasetSpec{}}},
@@ -577,7 +577,7 @@ func BenchmarkSendSpeed(b *testing.B) {
 			const someDataset = "source/some-dataset-1"
 			source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 				Intervals: []zfspool.SnapshotIntervalSpec{
-					{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+					{Name: zfspool.HourlyInterval, Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
 				},
 				Template: zfspool.SnapshotSpecTemplate{
 					Datasets: []zfspool.DatasetSelector{
@@ -669,7 +669,7 @@ func TestBackupSendingStateAndMetrics(t *testing.T) {
 	})
 	source.Spec.Snapshots = &zfspool.SnapshotsSpec{
 		Intervals: []zfspool.SnapshotIntervalSpec{
-			{Name: "hourly", Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
+			{Name: zfspool.HourlyInterval, Interval: metav1.Duration{Duration: 1 * time.Hour}, HistoryLimit: 1},
 		},
 		Template: zfspool.SnapshotSpecTemplate{
 			Datasets: []zfspool.DatasetSelector{

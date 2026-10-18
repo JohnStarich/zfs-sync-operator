@@ -109,6 +109,9 @@ func (i *SnapshotIntervalSpec) validate() (returnedErr error) {
 	return nil
 }
 
+// HourlyInterval is the frequently used name for the hourly snapshot interval
+const HourlyInterval = "hourly"
+
 func (s *SnapshotsSpec) validateIntervals() ([]SnapshotIntervalSpec, error) {
 	intervals := s.Intervals
 	if len(intervals) == 0 {
@@ -125,7 +128,7 @@ func (s *SnapshotsSpec) validateIntervals() ([]SnapshotIntervalSpec, error) {
 			// This default set of intervals determine a healthy set of snapshots, especially their names and history.
 			// Modifying them can change the perceived safety of the operator.
 			{
-				Name:         "hourly",
+				Name:         HourlyInterval,
 				HistoryLimit: uint(day/hour) + 1,
 				Interval:     metav1.Duration{Duration: hour},
 			},

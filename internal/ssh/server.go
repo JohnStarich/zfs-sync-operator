@@ -65,7 +65,7 @@ func TestServer(tb testing.TB, config TestConfig) (user, clientPrivateKey string
 	serverPublicKey = pointer.Of(serverPrivateKey.PublicKey().Marshal())
 
 	if config.Listener == nil {
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		listener, err := (&net.ListenConfig{}).Listen(tb.Context(), "tcp", "127.0.0.1:0")
 		require.NoError(tb, err)
 		tb.Cleanup(func() {
 			mustClose(tb, listener)

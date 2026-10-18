@@ -1,7 +1,7 @@
 SHELL = bash
 
 CHART_RELEASER_VERSION = 1.8.1
-LINT_VERSION = 2.1.6
+LINT_VERSION = 2.15.0
 GO_BIN = $(shell printf '%s/bin' "$$(go env GOPATH)")
 CONTAINER_BUILDER = $(shell which podman 2>/dev/null || which docker)
 
