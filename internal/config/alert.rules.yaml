@@ -8,9 +8,9 @@ spec:
     - name: zfs-sync-operator.rules
       rules:
         - alert: ZFSPoolUnhealthy
-          expr: zfs_sync_pool_state{state!~"Online"} > 0
+          expr: sum by(resource_namespace, resource_name, state) (zfs_sync_pool_state{state!~"Online"}) > 0
           for: 5m
-          keep_firing_for: 1h
+          keep_firing_for: 15m
           labels:
             severity: critical
           annotations:
@@ -19,9 +19,9 @@ spec:
             description: |
               ZFS Pool {{ $labels.resource_namespace }}/{{ $labels.resource_name }} is unhealthy with state {{ $labels.state }}
         - alert: ZFSBackupUnhealthy
-          expr: zfs_sync_backup_state{state!~"Ready|Sending"} > 0
+          expr: sum by(resource_namespace, resource_name, state) (zfs_sync_backup_state{state!~"Ready|Sending"}) > 0
           for: 5m
-          keep_firing_for: 1h
+          keep_firing_for: 15m
           labels:
             severity: critical
           annotations:
